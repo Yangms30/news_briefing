@@ -1,5 +1,7 @@
 import type {
   Article,
+  DispatchDetail,
+  DispatchSummary,
   GenerateProgressEvent,
   GenerateResult,
   Report,
@@ -243,6 +245,17 @@ export const api = {
         method: "POST",
         query: { user_id: userId },
       })
+    },
+  },
+
+  dispatches: {
+    list(userId: number, limit = 50): Promise<DispatchSummary[]> {
+      return request<DispatchSummary[]>("/api/dispatches", {
+        query: { user_id: userId, limit },
+      })
+    },
+    get(dispatchId: string): Promise<DispatchDetail> {
+      return request<DispatchDetail>(`/api/dispatches/${dispatchId}`)
     },
   },
 }

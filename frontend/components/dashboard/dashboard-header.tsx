@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Settings, User as UserIcon } from "lucide-react"
+import { Archive, Settings, User as UserIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { api, BriefBotApiError } from "@/lib/api"
 import { getUserId } from "@/lib/storage"
@@ -57,6 +57,17 @@ export function DashboardHeader() {
 
           {/* User section */}
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="보관함"
+              asChild
+            >
+              <Link href="/dashboard/history">
+                <Archive className="w-5 h-5" />
+              </Link>
+            </Button>
             <Button
               variant="ghost"
               size="icon"

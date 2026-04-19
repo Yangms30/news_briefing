@@ -71,6 +71,32 @@ export type SendResponse = {
   results: SendResult[]
 }
 
+// ---------- Dispatch Archive ----------
+// Mirrors backend/schemas.py DispatchChannelOut / DispatchSummary / DispatchDetail.
+
+export type DispatchChannel = {
+  channel: string
+  status: string
+  error_msg?: string | null
+  recipient?: string | null
+  sent_at: string
+}
+
+export type DispatchSummary = {
+  dispatch_id: string
+  sent_at: string
+  channels: DispatchChannel[]
+  report_count: number
+  categories: string[]
+}
+
+export type DispatchDetail = {
+  dispatch_id: string
+  sent_at: string
+  channels: DispatchChannel[]
+  reports: Report[]
+}
+
 // SSE events pushed by GET /api/reports/generate/stream.
 export type GenerateProgressEvent =
   | { type: "start"; categories: string[] }

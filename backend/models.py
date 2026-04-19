@@ -74,7 +74,14 @@ class SendLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # Shared across all channel rows produced by a single dispatch_user_reports() call
+    # so that the archive view can GROUP BY dispatch_id. UUID4 hex (32 chars).
+    dispatch_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", index=True)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     error_msg: Mapped[str | None] = mapped_column(Text)
+    # Recipient snapshot at send time: email address / slack webhook URL / "web".
+    recipient: Mapped[str | None] = mapped_column(String(500))
+    # JSON array of Report.id included in this batch (e.g. "[12,13,14,15,16,17]").
+    report_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

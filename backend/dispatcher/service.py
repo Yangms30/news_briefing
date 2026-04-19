@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -76,17 +77,31 @@ def dispatch_user_reports(db: Session, user_id: int) -> list[ChannelResult]:
         logger.info("user_id=%s: no active channels", user_id)
         return []
 
+    dispatch_id = uuid.uuid4().hex
+    report_ids_json = json.dumps([r.id for r in reports])
+
     results: list[ChannelResult] = []
     for name, target in active:
         if name == "web":
             status, err = WebSender.send(reports)
+            recipient: str | None = "web"
         elif name == "slack":
             status, err = SlackSender.send(str(target), user.name, reports)
+            recipient = str(target)
         elif name == "email":
             status, err = EmailSender.send(str(target), user.name, reports)
+            recipient = str(target)
         else:
             continue
-        db.add(SendLog(user_id=user_id, channel=name, status=status, error_msg=err))
+        db.add(SendLog(
+            user_id=user_id,
+            dispatch_id=dispatch_id,
+            channel=name,
+            status=status,
+            error_msg=err,
+            recipient=recipient,
+            report_ids=report_ids_json,
+        ))
         results.append(ChannelResult(channel=name, status=status, error_msg=err))
     db.commit()
     return results

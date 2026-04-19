@@ -8,7 +8,7 @@ from config import get_settings
 from database import Base, SessionLocal, engine
 import models  # noqa: F401  ensure models are registered with Base
 from models import Setting, User
-from routers import reports, send, settings as settings_router, users
+from routers import dispatches, reports, send, settings as settings_router, users
 
 # Scheduler is disabled for the demo window (prevents unbudgeted LLM spend).
 # Re-enable by uncommenting the import and lifespan calls below.
@@ -106,6 +106,7 @@ app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(send.router, prefix="/api/send", tags=["send"])
+app.include_router(dispatches.router, prefix="/api/dispatches", tags=["dispatches"])
 
 
 @app.get("/api/health")

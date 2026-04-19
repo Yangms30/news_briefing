@@ -74,3 +74,28 @@ class SendResult(BaseModel):
 class SendResponse(BaseModel):
     user_id: int
     results: list[SendResult]
+
+
+# ---------- Dispatch Archive ----------
+class DispatchChannelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    channel: str
+    status: str
+    error_msg: str | None
+    recipient: str | None
+    sent_at: datetime
+
+
+class DispatchSummary(BaseModel):
+    dispatch_id: str
+    sent_at: datetime
+    channels: list[DispatchChannelOut]
+    report_count: int
+    categories: list[str]
+
+
+class DispatchDetail(BaseModel):
+    dispatch_id: str
+    sent_at: datetime
+    channels: list[DispatchChannelOut]
+    reports: list[ReportOut]
