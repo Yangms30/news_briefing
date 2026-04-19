@@ -35,16 +35,24 @@ def _to_out(r: Report) -> ReportOut:
 def list_reports(
     user_id: int = Query(...),
     category: str | None = Query(None),
-    limit: int = Query(50, le=200),
+    limit: int = Query(200, le=500),
+    latest_only: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    """Return latest reports per category for this user (one per category)."""
+    """List reports for this user, newest first.
+
+    By default keeps only the latest report per category (existing dashboard
+    "오늘" view). Pass `latest_only=false` to get every row — used by the new
+    date-grouped dashboard layout where past days need all of their reports.
+    """
     q = db.query(Report).filter(Report.user_id == user_id)
     if category and category != "전체":
         q = q.filter(Report.category == category)
-    rows = q.order_by(Report.created_at.desc()).all()
+    rows = q.order_by(Report.created_at.desc()).limit(limit).all()
 
-    # Keep only the newest report per category
+    if not latest_only:
+        return [_to_out(r) for r in rows]
+
     seen: set[str] = set()
     latest: list[Report] = []
     for r in rows:
@@ -52,8 +60,6 @@ def list_reports(
             continue
         seen.add(r.category)
         latest.append(r)
-        if len(latest) >= limit:
-            break
     return [_to_out(r) for r in latest]
 
 

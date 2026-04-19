@@ -32,6 +32,13 @@ type RadioPlayerBarProps = {
    * toggles to "paused" state.
    */
   externalPauseSignal?: number
+  /**
+   * Specific report id to play (takes precedence over externalCategory when set).
+   * Used by past-date cards to play an older report rather than the current
+   * latest-per-category. Report must be included in `reports` prop.
+   */
+  externalReportId?: number | null
+  onExternalReportConsumed?: () => void
 }
 
 type LoadState = "idle" | "loading" | "ready" | "error"
@@ -51,6 +58,8 @@ export function RadioPlayerBar({
   onExternalConsumed,
   onPlayingCategoryChange,
   externalPauseSignal,
+  externalReportId,
+  onExternalReportConsumed,
 }: RadioPlayerBarProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const lastPauseSignalRef = useRef(0)
@@ -108,7 +117,22 @@ export function RadioPlayerBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioSrc])
 
-  // Bridge: parent requests a specific category.
+  // Bridge: parent requests a specific report id (past-date cards).
+  useEffect(() => {
+    if (externalReportId === undefined || externalReportId === null) return
+    const idx = playable.findIndex((r) => r.id === externalReportId)
+    if (idx === -1) {
+      onExternalReportConsumed?.()
+      return
+    }
+    setIsPaused(false)
+    setCurrentIndex(idx)
+    setCurrentTime(0)
+    setIsPlaying(true)
+    onExternalReportConsumed?.()
+  }, [externalReportId, playable, onExternalReportConsumed])
+
+  // Bridge: parent requests a specific category (today's CategoryReportGrid).
   useEffect(() => {
     if (!externalCategory) return
     const idx = playable.findIndex((r) => r.category === externalCategory)

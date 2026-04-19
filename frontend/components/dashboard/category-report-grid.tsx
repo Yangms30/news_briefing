@@ -39,7 +39,7 @@ export function CategoryReportGrid({ reports, playingCategory, onPlayCategory, o
   )
 }
 
-function ReportSection({
+export function ReportSection({
   report,
   isPlaying,
   onPlay,

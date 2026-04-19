@@ -209,9 +209,19 @@ export const api = {
   },
 
   reports: {
-    list(userId: number, opts: { category?: string; limit?: number } = {}): Promise<Report[]> {
+    list(
+      userId: number,
+      opts: { category?: string; limit?: number; latestOnly?: boolean } = {},
+    ): Promise<Report[]> {
       return request<Report[]>("/api/reports", {
-        query: { user_id: userId, category: opts.category, limit: opts.limit },
+        query: {
+          user_id: userId,
+          category: opts.category,
+          limit: opts.limit,
+          // Backend defaults to true; only send the flag when we explicitly
+          // want the full history view (dashboard date grouping).
+          latest_only: opts.latestOnly === undefined ? undefined : opts.latestOnly,
+        },
       })
     },
     get(id: number): Promise<Report> {

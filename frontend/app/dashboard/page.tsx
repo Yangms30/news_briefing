@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { DashboardHeader } from "@/components/dashboard/dashboard-header"
 import { RadioPlayerBar } from "@/components/dashboard/radio-player-bar"
 import { QuickActions } from "@/components/dashboard/quick-actions"
-import { CategoryReportGrid } from "@/components/dashboard/category-report-grid"
+import { DateGroupedDashboard } from "@/components/dashboard/date-grouped-dashboard"
 import { GenerationProgressPanel } from "@/components/dashboard/generation-progress-panel"
 import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -24,14 +24,18 @@ export default function DashboardPage() {
   const [selectedCategory, setSelectedCategory] = useState("전체")
   const [isExpanded, setIsExpanded] = useState(true)
   const [pendingPlay, setPendingPlay] = useState<string | null>(null)
+  const [pendingPlayReportId, setPendingPlayReportId] = useState<number | null>(null)
   const [playingCategory, setPlayingCategory] = useState<string | null>(null)
+  const [playingReportId, setPlayingReportId] = useState<number | null>(null)
   const [pauseSignal, setPauseSignal] = useState(0)
   const [progressEvents, setProgressEvents] = useState<GenerateProgressEvent[]>([])
   const [setting, setSetting] = useState<Setting | null>(null)
 
   const fetchList = useCallback(async (id: number) => {
     try {
-      const list = await api.reports.list(id)
+      // Pull every report (not just latest-per-category) so the date-grouped
+      // dashboard can show past days. Newest-first ordering preserved by the API.
+      const list = await api.reports.list(id, { latestOnly: false })
       setReports(list)
     } catch (err) {
       const detail = err instanceof BriefBotApiError ? err.detail : (err as Error).message
@@ -159,8 +163,14 @@ export default function DashboardPage() {
         setIsExpanded={setIsExpanded}
         externalCategory={pendingPlay}
         onExternalConsumed={() => setPendingPlay(null)}
-        onPlayingCategoryChange={setPlayingCategory}
+        onPlayingCategoryChange={(cat) => {
+          setPlayingCategory(cat)
+          // When the player clears (cat === null), also clear the playing id.
+          if (cat === null) setPlayingReportId(null)
+        }}
         externalPauseSignal={pauseSignal}
+        externalReportId={pendingPlayReportId}
+        onExternalReportConsumed={() => setPendingPlayReportId(null)}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-12">
@@ -184,13 +194,22 @@ export default function DashboardPage() {
         ) : filtered.length === 0 ? (
           <EmptyState onGenerate={handleGenerate} generating={generating} hasAny={reports.length > 0} />
         ) : (
-          <CategoryReportGrid
+          <DateGroupedDashboard
             reports={filtered}
             playingCategory={playingCategory}
-            onPlayCategory={(cat) => setPendingPlay(cat)}
+            playingReportId={playingReportId}
+            onPlayCategory={(cat) => {
+              setPendingPlay(cat)
+              setPlayingReportId(null)
+            }}
+            onPlayReportId={(id) => {
+              setPendingPlayReportId(id)
+              setPlayingReportId(id)
+            }}
             onPauseCategory={() => {
               setPauseSignal((s) => s + 1)
               setPlayingCategory(null)
+              setPlayingReportId(null)
             }}
           />
         )}
