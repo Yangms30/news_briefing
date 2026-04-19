@@ -13,9 +13,22 @@ export function categoryBadgeClass(category: string): string {
   return CATEGORY_BADGE[category] ?? DEFAULT_BADGE
 }
 
+/**
+ * Backend stores timestamps as naive UTC (datetime.utcnow()). Pydantic
+ * serializes them without a tz suffix, so `new Date(iso)` in the browser
+ * silently treats the string as *local* time — which is wrong. For KST
+ * (UTC+9) this makes everything look ~9 hours old. Force UTC interpretation
+ * by appending "Z" when no timezone indicator is present.
+ */
+export function parseUtcIso(iso: string | null | undefined): Date {
+  if (!iso) return new Date(NaN)
+  const hasTz = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso)
+  return new Date(hasTz ? iso : `${iso}Z`)
+}
+
 export function formatRelativeTime(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return ""
-  const d = new Date(iso)
+  const d = parseUtcIso(iso)
   if (Number.isNaN(d.getTime())) return ""
   const diffMs = now.getTime() - d.getTime()
   const diffMin = Math.floor(diffMs / 60_000)

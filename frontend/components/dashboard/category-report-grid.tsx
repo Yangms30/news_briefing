@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Clock, ExternalLink, Headphones, Pause, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,6 +54,22 @@ export function ReportSection({
   const badge = categoryBadgeClass(report.category)
   const time = formatRelativeTime(report.created_at)
 
+  // Defensive dedupe: orphan Article rows from an earlier Report (killed by a
+  // bulk delete that didn't cascade) can get reattached when SQLite reuses the
+  // PK id. Hide exact-link duplicates so the UI doesn't show the same article
+  // twice while the underlying DB is healed separately.
+  const articles = useMemo(() => {
+    const seen = new Set<string>()
+    const out: typeof report.articles = []
+    for (const a of report.articles) {
+      const key = a.link || `${a.title}|${a.source ?? ""}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(a)
+    }
+    return out
+  }, [report.articles])
+
   return (
     <section className="rounded-2xl border border-border/60 bg-card/60 p-5 shadow-sm">
       <header className="flex items-center justify-between gap-3 mb-4">
@@ -65,7 +81,7 @@ export function ReportSection({
             <Clock className="w-3 h-3" />
             {time}
           </span>
-          <span className="text-xs text-muted-foreground">· 기사 {report.articles.length}건</span>
+          <span className="text-xs text-muted-foreground">· 기사 {articles.length}건</span>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -92,7 +108,7 @@ export function ReportSection({
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {report.articles.map((a) => (
+        {articles.map((a) => (
           <ArticleCard key={a.id} article={a} />
         ))}
       </div>
