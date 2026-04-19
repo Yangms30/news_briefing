@@ -11,10 +11,12 @@ import {
   ChevronUp,
   ChevronDown,
   Check,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { cn } from "@/lib/utils"
+import { getReportAudioUrl } from "@/lib/api"
 import type { Report } from "@/lib/types"
 
 type RadioPlayerBarProps = {
@@ -24,28 +26,21 @@ type RadioPlayerBarProps = {
   externalCategory?: string | null
   onExternalConsumed?: () => void
   onPlayingCategoryChange?: (category: string | null) => void
+  /**
+   * Monotonically increasing counter — each increment pauses the audio.
+   * Used by the dashboard to pause playback when a CategoryReportGrid card
+   * toggles to "paused" state.
+   */
+  externalPauseSignal?: number
 }
 
-const CHARS_PER_SECOND = 5
+type LoadState = "idle" | "loading" | "ready" | "error"
 
 function formatTime(seconds: number) {
   const s = Math.max(0, Math.floor(seconds))
   const mins = Math.floor(s / 60)
   const secs = s % 60
   return `${mins}:${secs.toString().padStart(2, "0")}`
-}
-
-function estimateDuration(text: string): number {
-  return Math.max(10, Math.round(text.length / CHARS_PER_SECOND))
-}
-
-function pickKoreanVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
-  if (voices.length === 0) return null
-  return (
-    voices.find((v) => v.lang === "ko-KR") ??
-    voices.find((v) => v.lang?.startsWith("ko")) ??
-    null
-  )
 }
 
 export function RadioPlayerBar({
@@ -55,48 +50,27 @@ export function RadioPlayerBar({
   externalCategory,
   onExternalConsumed,
   onPlayingCategoryChange,
+  externalPauseSignal,
 }: RadioPlayerBarProps) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const lastPauseSignalRef = useRef(0)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.75)
-  const [voice, setVoice] = useState<SpeechSynthesisVoice | null>(null)
-  const [voicesLoaded, setVoicesLoaded] = useState(false)
-  const utterRef = useRef<SpeechSynthesisUtterance | null>(null)
-  const tickRef = useRef<number | null>(null)
+  const [loadState, setLoadState] = useState<LoadState>("idle")
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const playable = useMemo(
     () => reports.filter((r) => (r.radio_script ?? "").trim().length > 0),
     [reports]
   )
   const current = playable[currentIndex]
-  const totalTime = current ? estimateDuration(current.radio_script ?? "") : 0
+  const audioSrc = current ? getReportAudioUrl(current.id) : undefined
 
-  const hasTTS = typeof window !== "undefined" && "speechSynthesis" in window
-
-  useEffect(() => {
-    if (!hasTTS) return
-    const update = () => {
-      const list = window.speechSynthesis.getVoices()
-      setVoice(pickKoreanVoice(list))
-      setVoicesLoaded(list.length > 0)
-    }
-    update()
-    window.speechSynthesis.onvoiceschanged = update
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null
-    }
-  }, [hasTTS])
-
-  useEffect(() => {
-    return () => {
-      utterRef.current = null
-      if (hasTTS) window.speechSynthesis.cancel()
-      if (tickRef.current) window.clearInterval(tickRef.current)
-    }
-  }, [hasTTS])
-
+  // Reset index if list shrinks.
   useEffect(() => {
     if (currentIndex >= playable.length && playable.length > 0) {
       setCurrentIndex(0)
@@ -104,64 +78,37 @@ export function RadioPlayerBar({
     }
   }, [playable.length, currentIndex])
 
-  const stopTicking = () => {
-    if (tickRef.current) {
-      window.clearInterval(tickRef.current)
-      tickRef.current = null
-    }
-  }
-
-  const startTicking = (duration: number) => {
-    stopTicking()
-    tickRef.current = window.setInterval(() => {
-      setCurrentTime((t) => (t >= duration ? duration : t + 1))
-    }, 1000)
-  }
-
-  const speakCurrent = useCallback(() => {
-    if (!hasTTS || !current) return
-    const script = (current.radio_script ?? "").trim()
-    if (!script) return
-    const utter = new SpeechSynthesisUtterance(script)
-    utter.lang = voice?.lang ?? "ko-KR"
-    if (voice) utter.voice = voice
-    utter.volume = Math.max(0, Math.min(1, volume))
-    utter.rate = 1.0
-    const duration = estimateDuration(script)
-    utter.onend = () => {
-      if (utterRef.current !== utter) return
-      stopTicking()
-      setCurrentTime(duration)
-      setCurrentIndex((idx) => {
-        if (idx + 1 < playable.length) return idx + 1
-        setIsPlaying(false)
-        return idx
-      })
-    }
-    utter.onerror = () => {
-      if (utterRef.current !== utter) return
-      stopTicking()
-      setIsPlaying(false)
-    }
-    utterRef.current = utter
-    window.speechSynthesis.cancel()
-    setCurrentTime(0)
-    window.speechSynthesis.speak(utter)
-    startTicking(duration)
-  }, [hasTTS, current, voice, volume, playable.length])
-
+  // Keep element volume in sync.
   useEffect(() => {
-    if (!isPlaying || isPaused) return
-    speakCurrent()
-    return () => {
-      utterRef.current = null
-      if (hasTTS) window.speechSynthesis.cancel()
-      stopTicking()
+    const el = audioRef.current
+    if (!el) return
+    el.volume = Math.max(0, Math.min(1, volume))
+  }, [volume])
+
+  // When src changes (track switch), reset state; autoplay next if we were playing.
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el) return
+    setCurrentTime(0)
+    setDuration(0)
+    setErrorMessage(null)
+    setLoadState(audioSrc ? "loading" : "idle")
+    if (!audioSrc) return
+    // If the user was in an active playing session, continue onto the new track.
+    if (isPlaying && !isPaused) {
+      const p = el.play()
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          setIsPlaying(false)
+          setLoadState("error")
+          setErrorMessage("재생 실패 — 잠시 후 다시 시도해주세요")
+        })
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, currentIndex])
+  }, [audioSrc])
 
-  // Bridge: when parent requests a specific category, jump to it.
+  // Bridge: parent requests a specific category.
   useEffect(() => {
     if (!externalCategory) return
     const idx = playable.findIndex((r) => r.category === externalCategory)
@@ -176,7 +123,15 @@ export function RadioPlayerBar({
     onExternalConsumed?.()
   }, [externalCategory, playable, onExternalConsumed])
 
-  // Notify parent of current playing category for UI sync.
+  // Respond to external pause requests from sibling UI (category cards).
+  useEffect(() => {
+    if (externalPauseSignal === undefined) return
+    if (externalPauseSignal <= lastPauseSignalRef.current) return
+    lastPauseSignalRef.current = externalPauseSignal
+    audioRef.current?.pause()
+  }, [externalPauseSignal])
+
+  // Notify parent of currently-playing category.
   useEffect(() => {
     if (!onPlayingCategoryChange) return
     if (isPlaying && !isPaused && current) {
@@ -186,55 +141,105 @@ export function RadioPlayerBar({
     }
   }, [isPlaying, isPaused, current, onPlayingCategoryChange])
 
-  const handlePlayPause = () => {
-    if (!hasTTS || !current) return
+  const handlePlayPause = useCallback(() => {
+    const el = audioRef.current
+    if (!el || !current) return
     if (isPlaying && !isPaused) {
-      window.speechSynthesis.pause()
-      stopTicking()
-      setIsPaused(true)
-      return
-    }
-    if (isPlaying && isPaused) {
-      window.speechSynthesis.resume()
-      startTicking(totalTime)
-      setIsPaused(false)
+      el.pause()
       return
     }
     setIsPaused(false)
     setIsPlaying(true)
-  }
+    const p = el.play()
+    if (p && typeof p.catch === "function") {
+      p.catch((err: unknown) => {
+        setIsPlaying(false)
+        setLoadState("error")
+        const msg = (err as Error)?.message ?? ""
+        setErrorMessage(
+          msg.includes("503") || msg.toLowerCase().includes("unavailable")
+            ? "음성 서비스 일시 중단 — 서버 키 확인 필요"
+            : "재생 실패 — 잠시 후 다시 시도해주세요"
+        )
+      })
+    }
+  }, [current, isPlaying, isPaused])
 
   const handleSkipForward = () => {
     if (currentIndex + 1 >= playable.length) return
     setIsPaused(false)
     setCurrentIndex((i) => i + 1)
-    setCurrentTime(0)
   }
 
   const handleSkipBackward = () => {
-    setIsPaused(false)
-    setCurrentTime(0)
-    if (currentIndex === 0) {
-      if (isPlaying) speakCurrent()
+    const el = audioRef.current
+    if (el && currentTime > 2) {
+      el.currentTime = 0
+      setCurrentTime(0)
       return
     }
+    if (currentIndex === 0) {
+      if (el) {
+        el.currentTime = 0
+        setCurrentTime(0)
+      }
+      return
+    }
+    setIsPaused(false)
     setCurrentIndex((i) => i - 1)
   }
 
+  const handleSeek = (value: number) => {
+    const el = audioRef.current
+    if (!el) return
+    const t = Math.max(0, Math.min(duration || 0, value))
+    el.currentTime = t
+    setCurrentTime(t)
+  }
+
   const handleVolumeChange = (v: number) => {
-    setVolume(v / 100)
+    setVolume(Math.max(0, Math.min(1, v / 100)))
   }
 
-  const handleSeek = () => {
-    setCurrentTime(0)
-    if (isPlaying && !isPaused) speakCurrent()
+  // Audio element event handlers
+  const onLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const d = e.currentTarget.duration
+    setDuration(Number.isFinite(d) ? d : 0)
+    setLoadState("ready")
+  }
+  const onTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    setCurrentTime(e.currentTarget.currentTime)
+  }
+  const onPlay = () => {
+    setIsPlaying(true)
+    setIsPaused(false)
+  }
+  const onPause = () => {
+    // Pause fires on both user pause and end-of-track; distinguish via `ended`.
+    if (audioRef.current?.ended) return
+    setIsPaused(true)
+  }
+  const onEnded = () => {
+    if (currentIndex + 1 < playable.length) {
+      setIsPaused(false)
+      setCurrentIndex((i) => i + 1)
+    } else {
+      setIsPlaying(false)
+      setIsPaused(false)
+    }
+  }
+  const onAudioError = () => {
+    setLoadState("error")
+    setIsPlaying(false)
+    setErrorMessage(
+      "음성을 불러오지 못했습니다. 서버 상태 또는 OPENAI_API_KEY를 확인해주세요."
+    )
   }
 
-  const warning = !hasTTS
-    ? "이 브라우저는 음성 재생을 지원하지 않습니다."
-    : voicesLoaded && !voice
-      ? "한국어 음성이 없어 기본 음성으로 재생됩니다."
-      : null
+  const label = current ? `${current.category} 분야 라디오` : "오늘의 분야별 라디오"
+  const showLoader = loadState === "loading" && isPlaying && !isPaused
+  const warning = loadState === "error" ? errorMessage : null
+  const playDisabled = !current || loadState === "error"
 
   const categoryProgress = playable.map((r, i) => ({
     name: r.category,
@@ -244,11 +249,29 @@ export function RadioPlayerBar({
 
   if (playable.length === 0) return null
 
-  const label = current ? `${current.category} 분야 라디오` : "오늘의 분야별 라디오"
+  const hiddenAudio = (
+    <audio
+      ref={audioRef}
+      preload="none"
+      src={audioSrc}
+      onLoadStart={() => {
+        setLoadState("loading")
+        setErrorMessage(null)
+      }}
+      onCanPlay={() => setLoadState("ready")}
+      onLoadedMetadata={onLoadedMetadata}
+      onTimeUpdate={onTimeUpdate}
+      onPlay={onPlay}
+      onPause={onPause}
+      onEnded={onEnded}
+      onError={onAudioError}
+    />
+  )
 
   if (!isExpanded) {
     return (
       <div className="sticky top-16 z-40 border-b border-border/50 bg-card/90 backdrop-blur-xl">
+        {hiddenAudio}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14 gap-4">
             <div className="flex items-center gap-3 min-w-0">
@@ -257,9 +280,11 @@ export function RadioPlayerBar({
                 size="icon"
                 className="w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={handlePlayPause}
-                disabled={!hasTTS}
+                disabled={playDisabled}
               >
-                {isPlaying && !isPaused ? (
+                {showLoader ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : isPlaying && !isPaused ? (
                   <Pause className="w-5 h-5" />
                 ) : (
                   <Play className="w-5 h-5 ml-0.5" />
@@ -274,7 +299,7 @@ export function RadioPlayerBar({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>{formatTime(currentTime)}</span>
               <span>/</span>
-              <span>{formatTime(totalTime)}</span>
+              <span>{formatTime(duration)}</span>
             </div>
 
             <Button
@@ -294,6 +319,7 @@ export function RadioPlayerBar({
 
   return (
     <div className="sticky top-16 z-40 border-b border-border/50 bg-card/90 backdrop-blur-xl">
+      {hiddenAudio}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
@@ -319,7 +345,7 @@ export function RadioPlayerBar({
                 size="icon"
                 className="text-muted-foreground hover:text-foreground"
                 onClick={handleSkipBackward}
-                disabled={!hasTTS}
+                disabled={playDisabled}
               >
                 <SkipBack className="w-5 h-5" />
               </Button>
@@ -328,9 +354,11 @@ export function RadioPlayerBar({
                 size="icon"
                 className="w-12 h-12 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={handlePlayPause}
-                disabled={!hasTTS}
+                disabled={playDisabled}
               >
-                {isPlaying && !isPaused ? (
+                {showLoader ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : isPlaying && !isPaused ? (
                   <Pause className="w-6 h-6" />
                 ) : (
                   <Play className="w-6 h-6 ml-0.5" />
@@ -341,7 +369,7 @@ export function RadioPlayerBar({
                 size="icon"
                 className="text-muted-foreground hover:text-foreground"
                 onClick={handleSkipForward}
-                disabled={!hasTTS || currentIndex + 1 >= playable.length}
+                disabled={playDisabled || currentIndex + 1 >= playable.length}
               >
                 <SkipForward className="w-5 h-5" />
               </Button>
@@ -353,12 +381,14 @@ export function RadioPlayerBar({
               </span>
               <Slider
                 value={[currentTime]}
-                max={totalTime || 1}
+                max={duration || 1}
                 step={1}
-                onValueChange={() => handleSeek()}
+                onValueChange={(value) => handleSeek(value[0])}
                 className="flex-1"
               />
-              <span className="text-sm text-muted-foreground w-12">{formatTime(totalTime)}</span>
+              <span className="text-sm text-muted-foreground w-12">
+                {formatTime(duration)}
+              </span>
             </div>
 
             <div className="hidden md:flex items-center gap-2 w-32">
@@ -396,7 +426,9 @@ export function RadioPlayerBar({
             </div>
           )}
 
-          {warning && <div className="text-center text-xs text-muted-foreground">{warning}</div>}
+          {warning && (
+            <div className="text-center text-xs text-destructive">{warning}</div>
+          )}
         </div>
       </div>
     </div>

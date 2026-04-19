@@ -13,7 +13,7 @@
 1. **프롬프트 엔지니어링** — 복잡한 태스크를 "기사별 3줄 요약(Step1) → 카테고리별 구어체 라디오 스크립트(Step2)" 2단계로 분해
 2. **컨텍스트 엔지니어링** — LLM 호출 전 TF-IDF + 코사인 유사도(0.6)로 뉴스 클러스터링, 대표 기사 2~3건만 모델에 전달하여 경량 모델의 성능 극대화
 3. **하네스 엔지니어링** — 재시도(2회), RSS summary fallback, 카테고리 단위 forward-error-tolerant 루프로 LLM 바깥에서 품질 보장
-4. **라디오 모드** — 같은 이슈 데이터를 문어체 요약 + 구어체 스크립트로 동시 생성, Web Speech API(`ko-KR`)로 재생
+4. **라디오 모드** — 같은 이슈 데이터를 문어체 요약 + 구어체 스크립트로 동시 생성, OpenAI `gpt-4o-mini-tts`(voice: `nova`)로 서버에서 mp3 합성·캐시 후 재생
 
 ## 아키텍처
 
@@ -25,7 +25,7 @@
 │  • /dashboard         │                │   ├─ users                       │
 │    - CategoryReportGrid                │   ├─ settings (PUT upsert)       │
 │    - RadioPlayerBar   │                │   ├─ reports  (list/detail/     │
-│      (Web Speech API) │                │     generate + /generate/stream)│
+│      (OpenAI TTS mp3) │                │     generate + /audio + stream) │
 │    - GenerationProgressPanel (SSE)     │   └─ send    (다채널 배치)       │
 │  • /dashboard/settings│                │                                  │
 └───────────────────────┘                │  Pipeline                        │
@@ -62,7 +62,7 @@
 | 진행 스트리밍 | Server-Sent Events (`/api/reports/generate/stream`) | ✅ |
 | Slack | Incoming Webhook + Block Kit JSON | ✅ |
 | Email | SMTP (Gmail App Password) + 반응형 HTML | ⚠️ SMTP 키 주입 대기 |
-| TTS | Web Speech API (`ko-KR` voice 자동 선택) | ✅ |
+| TTS | OpenAI `gpt-4o-mini-tts` (voice: `nova`) → mp3 디스크 캐시 | ✅ |
 
 > 💡 **축소된 범위**: 원 설계에는 `Claude Haiku → Gemini Flash` 멀티모델 폴백과 `네이버 검색 API + NewsAPI + RSS` 다중 소스가 있었으나, 키 미발급으로 `OpenAI gpt-5-nano + Google News RSS` 단일 경로로 축소했습니다. `analyzer.py`는 Analyzer 클래스 치환만으로 폴백 복원 가능, `collector.py`도 Client 클래스 추가만으로 소스 확장 가능한 플러그인 구조입니다. 자세한 경위는 [`plan.md` 변경 이력](./plan.md#변경-이력) 참고.
 
@@ -92,7 +92,7 @@ briefBot/
 │   ├── components/dashboard/
 │   │   ├── category-report-grid.tsx        # 카테고리 카드 + 기사 요약 + ▶ 외부 재생 트리거
 │   │   ├── generation-progress-panel.tsx   # SSE 단계별 진행 렌더
-│   │   ├── radio-player-bar.tsx            # Web Speech API, ko-KR 자동 선택
+│   │   ├── radio-player-bar.tsx            # HTMLAudioElement + OpenAI TTS mp3 스트림
 │   │   └── quick-actions.tsx               # "지금 리포트 받기" + 카테고리 필터
 │   └── lib/                          # types, api, storage(DEMO_USER_ID=1 고정), schedule, categories, briefing-display
 ├── plan.md                           # 설계 원본 (소스 오브 트루스)
@@ -142,7 +142,7 @@ pnpm dev
 3. 대시보드 **"지금 리포트 받기"** 버튼 클릭
 4. SSE Progress Panel에 `start → category_start → collected → clustered → summarizing_article → synthesizing_radio → category_done → done` 이벤트가 실시간 표시됨
 5. 생성 완료 시 자동으로 `POST /api/send`가 체이닝되어 활성 채널(web/email/slack)로 일괄 발송
-6. 카테고리별 카드에서 ▶ 버튼 클릭 → 라디오 바가 해당 카테고리 스크립트 재생 (`ko-KR`)
+6. 카테고리별 카드에서 ▶ 버튼 클릭 → 라디오 바가 `GET /api/reports/{id}/audio`로 OpenAI TTS mp3를 스트림 재생 (첫 재생은 합성, 이후는 캐시 hit)
 
 ## API 엔드포인트
 
@@ -198,7 +198,7 @@ pnpm dev
 - `GET /api/reports/generate/stream?user_id=1` → `start` 이벤트부터 `done`까지 SSE 정상 흐름
 - `POST /api/send?user_id=1` → 활성 채널(web / email / slack) 결과 반환 + `send_logs` 기록
 - 프론트: `pnpm exec tsc --noEmit` pass, `pnpm exec next build` pass (3 routes)
-- 남은 실기기 검증: ① Gmail SMTP 앱 비밀번호 기입 후 실제 메일 수신, ② 브라우저 Chrome/Safari `ko-KR` TTS 재생, ③ (선택) Slack Webhook으로 Block Kit 메시지 수신
+- 남은 실기기 검증: ① Gmail SMTP 앱 비밀번호 기입 후 실제 메일 수신, ② 브라우저 Chrome/Safari에서 OpenAI TTS mp3 재생(첫 재생 합성, 두 번째 재생 캐시 hit), ③ (선택) Slack Webhook으로 Block Kit 메시지 수신
 
 ## 설계 의사결정
 
@@ -208,7 +208,7 @@ pnpm dev
 - **왜 SSE 진행 스트림?** 생성에 15~30초가 걸려 UX 불만이 큼 → 단계별 이벤트를 실시간 렌더하여 "무엇이 진행 중인지" 시연 중에도 설명 가능.
 - **왜 로그인 제거?** 시연 시간 단축 + 주의를 핵심 기능(브리핑 생성/라디오)에 집중. users/settings 스키마는 유지했으므로 온보딩 컴포넌트만 복구하면 다중 유저 복원 가능.
 - **왜 스케줄러 의도적 비활성?** 시연 윈도(4/19~4/21)에 APScheduler cron이 트리거해 예상치 못한 LLM 비용이 발생하지 않도록 차단. 주석 해제 한 줄로 복원.
-- **왜 Web Speech API?** 비용 0, API 키 불필요. 프로덕션 확장 시 Google Cloud TTS / CLOVA Voice로 교체하도록 `audio_formatter` 레이어 분리.
+- **왜 OpenAI `gpt-4o-mini-tts`?** 초기 프로토타입은 Web Speech API(비용 0)였으나 실기기에서 목소리가 인위적이라 교체. 서버에서 mp3를 합성·디스크 캐시(`./media/audio/{report_id}.mp3`)해 두 번째 재생부터는 추가 비용 0. `services/tts.py` 레이어로 감싸 ElevenLabs / CLOVA Voice로 전환도 1파일 수정.
 - **왜 클러스터링을 코드로?** 임베딩 API 비용 절감 + LLM 토큰 절약. "코드가 할 수 있는 건 코드가 하고, 모델은 모델만 할 수 있는 일(자연어 이해/생성)에만 집중."
 
 ## 라이선스

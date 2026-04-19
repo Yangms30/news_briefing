@@ -179,6 +179,14 @@ async function parseErrorDetail(res: Response): Promise<string> {
 
 // ---------- Namespace API ----------
 
+/**
+ * URL for the mp3 stream of a report's radio_script.
+ * Backend synthesizes on first call (OpenAI gpt-4o-mini-tts) and caches on disk.
+ */
+export function getReportAudioUrl(reportId: number): string {
+  return new URL(`/api/reports/${reportId}/audio`, BASE_URL).toString()
+}
+
 export const api = {
   users: {
     create(input: { name: string; email: string }): Promise<User> {

@@ -2,16 +2,18 @@ import json
 import logging
 import queue
 import threading
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from models import Article, Report
 from pipeline.service import generate_reports_for_user
 from schemas import ArticleOut, ReportGenerateResponse, ReportOut
+from services.tts import TTSUnavailable, synthesize_to_file
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,30 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
     if not a:
         raise HTTPException(404, "Article not found")
     return ArticleOut.model_validate(a)
+
+
+@router.get("/{report_id}/audio")
+def get_report_audio(report_id: int, db: Session = Depends(get_db)):
+    """Stream the mp3 for this report's radio_script (OpenAI gpt-4o-mini-tts).
+
+    Lazy synthesis + disk cache. First call takes a few seconds; subsequent
+    calls serve the cached file instantly.
+    """
+    r = db.query(Report).filter(Report.id == report_id).first()
+    if not r:
+        raise HTTPException(404, "Report not found")
+    if not (r.radio_script or "").strip():
+        raise HTTPException(404, "Report has no radio_script")
+    try:
+        path: Path = synthesize_to_file(r)
+    except TTSUnavailable as exc:
+        raise HTTPException(503, f"TTS unavailable: {exc}")
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        filename=f"report-{report_id}.mp3",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.post("/generate", response_model=ReportGenerateResponse)

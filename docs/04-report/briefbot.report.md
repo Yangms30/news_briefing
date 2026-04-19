@@ -1,5 +1,8 @@
 # BriefBot 프로젝트 PDCA 완료 리포트
 
+> ⚠️ **HISTORICAL SNAPSHOT (Day 3 시점)** — 최신 상태는 [`briefbot-submission-report.md`](./briefbot-submission-report.md) 참고.
+> 이 문서는 Day 3 종료 시점(4/17)의 스냅샷으로 Gemini → OpenAI 교체, briefings→reports/articles 재설계, 온보딩 제거(Day 4), **Web Speech API → OpenAI gpt-4o-mini-tts 교체(Day 4)** 가 반영되지 않았습니다.
+
 > **프로젝트**: BriefBot — 서울신문 과제평가 AI 이슈 브리핑 시스템
 >
 > **리포트 작성일**: 2026-04-17
@@ -44,7 +47,7 @@
 
 - **LLM**: Gemini 2.5 Flash Lite (무료 티어)
 - **뉴스 소스**: Google News RSS (카테고리당 20건/24h)
-- **채널**: 웹(DB 저장) + Slack(Incoming Webhook) + 이메일(SMTP) + 라디오(Web Speech API)
+- **채널**: 웹(DB 저장) + Slack(Incoming Webhook) + 이메일(SMTP) + 라디오(Day 3: Web Speech API → Day 4 교체: **OpenAI gpt-4o-mini-tts, voice=nova**)
 - **파이프라인**: 수집 → 전처리(TF-IDF 클러스터링) → 분석(3단 LLM 호출) → 포맷팅 → 발송
 - **스케줄러**: APScheduler (사용자별 cron 설정)
 
@@ -179,7 +182,7 @@
 | 토스트 | Sonner | ✅ 구현 완료 |
 | 타입 검사 | TypeScript strict | ✅ pass (`tsc --noEmit`) |
 | 빌드 | Next.js | ✅ pass (`next build`, 4개 routes) |
-| TTS | Web Speech API | ✅ 구현 완료 |
+| TTS | Day 3: Web Speech API → Day 4: OpenAI `gpt-4o-mini-tts` (voice: `nova`) | ✅ 교체 완료 |
 
 ---
 
@@ -279,7 +282,7 @@ Day 3 구현 자체가 Major/Minor 이슈 해소 효과로 인정
 | **스케줄러** | APScheduler | - | ✅ | 사용자별 cron |
 | **Slack** | Incoming Webhook | - | ✅ | Block Kit |
 | **Email** | SMTP (Gmail) | - | ✅ | 반응형 HTML |
-| **TTS** | Web Speech API | - | ✅ | 브라우저 내장 |
+| **TTS** | OpenAI `gpt-4o-mini-tts` (voice: `nova`) | - | ✅ | 서버 mp3 합성 + 디스크 캐시 (Day 4 교체) |
 
 ---
 
@@ -304,7 +307,7 @@ Day 3 구현 자체가 Major/Minor 이슈 해소 효과로 인정
 - ✅ TypeScript strict mode (tsc --noEmit pass)
 - ✅ Next.js 빌드 (next build pass)
 - ✅ Sonner toast 통합
-- ✅ Web Speech API (라디오 모드)
+- ✅ 라디오 모드 (Day 3: Web Speech API → Day 4: OpenAI gpt-4o-mini-tts 교체)
 - ✅ mock 제거 + 실 API 연동
 
 ### 문서
@@ -548,7 +551,7 @@ importance = (llm_score * 0.7) + (cluster_size_weight * 0.3)
 BriefBot은 **경량 LLM의 한계를 구조와 엔지니어링으로 극복하는 실전 시스템**이다.
 
 - ✅ **설계 충실도**: 94% Match Rate (Day 3 반영 후)
-- ✅ **기술 완성도**: FastAPI + Next.js + Gemini + APScheduler + Web Speech API 통합
+- ✅ **기술 완성도**: FastAPI + Next.js + Gemini + APScheduler + Web Speech API 통합 *(Day 3 시점 — 최신은 submission-report 참고)*
 - ✅ **확장 가능성**: 플러그인 아키텍처로 새 소스/모델/채널 추가 용이
 - ✅ **사용자 경험**: 온보딩 5단계 + 실시간 브리핑 + 라디오 모드 (차별화)
 

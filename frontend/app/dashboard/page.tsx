@@ -25,6 +25,7 @@ export default function DashboardPage() {
   const [isExpanded, setIsExpanded] = useState(true)
   const [pendingPlay, setPendingPlay] = useState<string | null>(null)
   const [playingCategory, setPlayingCategory] = useState<string | null>(null)
+  const [pauseSignal, setPauseSignal] = useState(0)
   const [progressEvents, setProgressEvents] = useState<GenerateProgressEvent[]>([])
   const [setting, setSetting] = useState<Setting | null>(null)
 
@@ -147,6 +148,7 @@ export default function DashboardPage() {
         externalCategory={pendingPlay}
         onExternalConsumed={() => setPendingPlay(null)}
         onPlayingCategoryChange={setPlayingCategory}
+        externalPauseSignal={pauseSignal}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-12">
@@ -175,9 +177,7 @@ export default function DashboardPage() {
             playingCategory={playingCategory}
             onPlayCategory={(cat) => setPendingPlay(cat)}
             onPauseCategory={() => {
-              if (typeof window !== "undefined" && "speechSynthesis" in window) {
-                window.speechSynthesis.pause()
-              }
+              setPauseSignal((s) => s + 1)
               setPlayingCategory(null)
             }}
           />
