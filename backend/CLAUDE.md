@@ -26,7 +26,12 @@ collector.py ──▶ preprocessor.py ──▶ analyzer.py ──▶ service.p
 (RSS 수집)        (TF-IDF 클러스터링)   (OpenAI + 하네스)    (오케스트레이션)
 ```
 
-- **`pipeline/collector.py`** — Google News RSS만 사용 (`feedparser`). 카테고리→쿼리 매핑은 `CATEGORY_QUERIES` 상수. 네이버/NewsAPI는 미발급이라 클라이언트 클래스가 없음. 추가 소스가 필요하면 같은 인터페이스(`RawArticle` 반환)로 새 Client 추가.
+- **`pipeline/collector.py`** — 다중 RSS 소스 (`feedparser` + httpx 재시도). 3개 Client가 병렬 아닌 순차 호출되어 `MultiSourceCollector`에서 URL 기반 dedupe 후 TF-IDF로 넘어감:
+  - `GoogleRSSClient` — Google News RSS (내부 aggregator, 여러 한국 언론사 커버). `CATEGORY_QUERIES` 상수.
+  - `YonhapRSSClient` — 연합뉴스 직접 피드. 카테고리별 `/rss/{slug}.xml`. IT/과학은 전용 피드가 없어 `industry.xml`(산업)로 대체.
+  - `SeoulNewsRSSClient` — 서울신문 직접 피드(과제 주최사). `/xml/rss/rss_{slug}.xml`. IT/과학 전용 피드 없어 skip (Google + 연합이 커버).
+  - 공통 helper `_fetch_rss_url()`가 timeout=20s + max_attempts=3 + linear backoff. 한 소스가 타임아웃/404여도 다른 소스 결과는 유지.
+  - 새 소스 추가: 동일 인터페이스(`fetch(category) -> list[RawArticle]`)의 Client 클래스 만들고 `MultiSourceCollector.__init__`의 기본 목록에 추가.
 - **`pipeline/preprocessor.py`** — LLM 호출 없음. 제목을 TF-IDF 벡터화 후 코사인 유사도 ≥ `CLUSTER_THRESHOLD`(0.6)로 그리디 클러스터링. 클러스터당 대표 기사 2~3건(최신순 + 출처 다양성). 노이즈 제거는 `NOISE_PATTERNS` 정규식.
 - **`pipeline/analyzer.py`** — **여기에만 LLM 호출 집중.** 기본 `OpenAIAnalyzer` (`gpt-5-nano`). `GeminiAnalyzer`는 레거시 폴백 클래스로 보존. 2단 호출:
   1. `summarize_article(category, article)` — 기사별 3줄 한국어 요약(문어체). 길이 ≥ 30자 검증 + `LLM_MAX_RETRIES`회 재시도 → 실패 시 `RawArticle.summary` 기반 RSS fallback.

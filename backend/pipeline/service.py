@@ -11,7 +11,7 @@ from models import Article, Report, Setting
 from schemas import ReportOut
 
 from .analyzer import OpenAIAnalyzer
-from .collector import GoogleRSSClient
+from .collector import MultiSourceCollector
 from .preprocessor import cluster_articles, pick_top_articles
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,11 @@ def generate_reports_for_user(
     if not categories:
         return []
 
-    collector = GoogleRSSClient(hours=cfg.ARTICLE_HOURS, per_category=cfg.COLLECT_PER_CATEGORY)
+    # Multi-source: Google News (aggregator) + 연합뉴스 + 서울신문. Each source is
+    # optional — if one times out/404s, MultiSourceCollector still returns whatever
+    # the others produced. URL-dedup happens inside the collector; content-dedup
+    # by TF-IDF clustering downstream.
+    collector = MultiSourceCollector(hours=cfg.ARTICLE_HOURS, per_category=cfg.COLLECT_PER_CATEGORY)
     analyzer = OpenAIAnalyzer()
 
     _emit(on_progress, {"type": "start", "categories": categories})

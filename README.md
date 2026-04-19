@@ -2,7 +2,7 @@
 
 > 가벼운 LLM으로도 똑똑하게 — 파이프라인 엔지니어링으로 뉴스를 분석하고 자동 브리핑하는 시스템
 
-서울신문 과제평가 제출용 AI 이슈 브리핑 프로토타입. Google News RSS에서 공개 뉴스를 수집하고, OpenAI `gpt-5-nano`로 카테고리별 리포트(3건 요약 + 구어체 라디오 스크립트)를 생성하여 웹/Slack/이메일 채널로 자동 전달하는 풀스택 시스템입니다.
+서울신문 과제평가 제출용 AI 이슈 브리핑 프로토타입. **Google News + 연합뉴스 + 서울신문 RSS 3개 소스를 병렬 수집**하고, OpenAI `gpt-5-nano`로 카테고리별 리포트(3건 요약 + 구어체 라디오 스크립트)를 생성하여 웹/Slack/이메일 채널로 자동 전달하는 풀스택 시스템입니다.
 
 **최종 업데이트: 2026-04-19** — Day 1~4 누적 구현 완료(백엔드 파이프라인 + 프론트 연동 + 다채널 발송 + 스케줄러 + TTS + 로그인 제거). 남은 일정: Day 5 SMTP 키 주입 및 실기기 리허설 → 4/21 18:00 제출.
 
@@ -56,7 +56,7 @@
 | Backend | FastAPI + SQLAlchemy + SQLite (Python 3.11+) | ✅ |
 | LLM (메인) | OpenAI `gpt-5-nano` — 경량 모델, `temperature` 커스텀 불가(항상 1.0) | ✅ |
 | LLM (레거시) | Gemini 2.5 Flash Lite — `GeminiAnalyzer` 클래스 유지, 현재 미사용 | ♻️ |
-| News | Google News RSS (`feedparser`, 카테고리당 20건/24h) | ✅ |
+| News | Google News RSS + 연합뉴스 RSS + 서울신문 RSS 다중 소스 (`feedparser`, URL dedupe, 소스별 24h/20건) | ✅ |
 | Clustering | scikit-learn TF-IDF + cosine similarity (threshold 0.6) | ✅ |
 | Scheduler | APScheduler (Asia/Seoul) | ⚠️ 데모 기간 lifespan 주석처리 |
 | 진행 스트리밍 | Server-Sent Events (`/api/reports/generate/stream`) | ✅ |

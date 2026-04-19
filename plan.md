@@ -33,7 +33,7 @@
 | **LLM (메인)** | OpenAI `gpt-5-nano` | 경량 모델, 저비용 고성능 | ✅ 구현 완료 (`OpenAIAnalyzer`) |
 | **LLM (레거시)** | Gemini 2.5 Flash Lite | `gemini-2.5-flash-lite` | ♻️ 클래스 유지(`GeminiAnalyzer`), 현재 미사용 |
 | **스케줄러** | APScheduler | FastAPI 프로세스 내장 | ⚠️ **데모 기간 의도적 비활성화** (LLM 비용 통제, `main.py` lifespan 주석처리) — 코드 자체는 완성 |
-| **뉴스 소스** | Google News RSS (단일) | `feedparser`, 카테고리당 20건/24h | ✅ 구현 완료 |
+| **뉴스 소스** | Google News + 연합뉴스 + 서울신문 RSS (다중) | `feedparser` 병렬 수집 + URL dedupe + 소스별 20건/24h. 한 소스 실패해도 나머지로 진행 | ✅ 구현 완료 (Day 5 확장) |
 | **~~네이버/NewsAPI~~** | (키 미발급으로 보류) | 추후 확장 포인트 | ⬜ 미적용 |
 | **이메일 발송** | SMTP (Gmail App Password) | 반응형 HTML 템플릿 | ✅ 구현 완료 (.env 키만 채우면 동작) |
 | **Slack 발송** | Incoming Webhook | Block Kit JSON | ✅ 구현 완료 (Webhook URL 설정 시 동작) |
@@ -51,7 +51,9 @@
 | Claude API (Haiku 4.5) | platform.claude.com | Pay-as-you-go | ⬜ 미발급 |
 | 네이버 검색 API | ncloud.com | 25,000건/일 | ⬜ 미발급 (RSS로 대체) |
 | NewsAPI.org | newsapi.org/register | 100건/일 | ⬜ 미발급 (RSS로 대체) |
-| Google News RSS | (키 불필요) | 무제한 | ✅ 바로 사용 가능 — **유일한 소스로 채택** |
+| Google News RSS | (키 불필요) | 무제한 | ✅ 1차 소스 (aggregator, 여러 언론사 커버) |
+| 연합뉴스 RSS | (키 불필요) | 무제한 | ✅ 2차 소스 (국내 최대 공영 통신사, 카테고리별 피드) |
+| 서울신문 RSS | (키 불필요) | 무제한 | ✅ 3차 소스 (과제 주최사, 카테고리별 피드) |
 | Gmail SMTP (앱 비밀번호) | myaccount.google.com/apppasswords | 무료 | ⚠️ 데모 직전 발급 필요 (`SMTP_PASSWORD` 환경변수) |
 | Slack Incoming Webhook | api.slack.com/apps | 무료 | ⬜ 선택 사항 (발급 시 `/dashboard/settings`에서 URL 입력) |
 
@@ -144,7 +146,10 @@
 
 | 소스 | 용도 | 호출 방식 | 구현 상태 |
 |------|------|-----------|-----------|
-| Google News RSS | 국내외 통합 (유일 소스) | `https://news.google.com/rss/search?q=...&hl=ko&gl=KR&ceid=KR:ko` → feedparser | ✅ 완료 (`pipeline/collector.py`) |
+| Google News RSS | 국내외 통합 aggregator | `https://news.google.com/rss/search?q=...&hl=ko&gl=KR&ceid=KR:ko` → feedparser | ✅ `GoogleRSSClient` |
+| 연합뉴스 RSS | 국내 공영 통신사 직접 피드 | `https://www.yna.co.kr/rss/{politics|economy|society|international|sports|industry}.xml` → feedparser | ✅ `YonhapRSSClient` |
+| 서울신문 RSS | 과제 주최사 직접 피드 | `https://www.seoul.co.kr/xml/rss/rss_{politics|economy|society|international|sports}.xml` → feedparser (IT/과학 전용 피드 없음, skip) | ✅ `SeoulNewsRSSClient` |
+| Multi-source fanout | 3개 소스 병합 + URL dedupe | `MultiSourceCollector` — 한 소스가 타임아웃/404여도 graceful 유지 | ✅ `MultiSourceCollector` |
 | ~~네이버 검색 API~~ | 국내 뉴스 | Client ID/Secret 미발급으로 보류 | ⬜ 확장 포인트 |
 | ~~NewsAPI.org~~ | 해외 뉴스 | API Key 미발급으로 보류 | ⬜ 확장 포인트 |
 

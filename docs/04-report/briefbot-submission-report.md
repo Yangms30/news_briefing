@@ -167,7 +167,7 @@ plan.md §2-§12 재정합(재설계 내용 반영)
 | **Database** | SQLite | ✅ | 로컬, 부팅 시 자동 초기화 |
 | **LLM (메인)** | OpenAI `gpt-5-nano` | ✅ | 경량, 저비용, temperature 불가 (기본값 1.0) |
 | **LLM (레거시)** | Gemini 2.5 Flash Lite | ✅ | 코드에 클래스 유지, 미사용 |
-| **뉴스 수집** | Google News RSS (단일) | ✅ | feedparser, 24h/20건 |
+| **뉴스 수집** | Google News + 연합뉴스 + 서울신문 RSS (다중) | ✅ | feedparser + URL dedupe, 소스별 24h/20건, fallback 내장 |
 | **뉴스 전처리** | TF-IDF + 코사인 유사도 | ✅ | 코드 기반(LLM 불필요) |
 | **스케줄러** | APScheduler | ✅ | main.py에서 의도적 주석 (데모) |
 | **메시지 발송** |  |  |  |

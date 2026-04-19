@@ -1,6 +1,6 @@
 # BriefBot 뉴스 수집 · 클러스터링 파이프라인 상세
 
-> 최종 업데이트: 2026-04-19
+> 최종 업데이트: 2026-04-20 (Day 5 — 다중 소스 확장)
 > 대상 코드: `backend/pipeline/collector.py`, `backend/pipeline/preprocessor.py`, `backend/pipeline/service.py`, `backend/config.py`
 
 이 문서는 "지금 리포트 받기" 버튼을 눌렀을 때 뉴스가 **어떤 API를 거쳐 · 어떤 기준으로 선별되어 · 어떻게 묶여서 · 무엇이 LLM에 전달되는지**를 한 곳에 정리한다.
@@ -12,9 +12,9 @@
 ```
 사용자 카테고리 6개(정치/경제/사회/국제/스포츠/IT/과학)
   └─ 각 카테고리마다:
-       ① Google News RSS 검색 (키 불필요, 무료)
-       ② 최근 24시간 & 최대 20건으로 컷
-       ③ 제목 TF-IDF → 코사인 유사도 ≥ 0.6 로 그리디 클러스터링
+       ① 3개 RSS 소스 병렬 호출 (Google News + 연합뉴스 + 서울신문), 키 불필요
+       ② 소스별 최근 24시간 & 최대 20건으로 컷 → MultiSourceCollector에서 URL dedupe
+       ③ 제목 TF-IDF → 코사인 유사도 ≥ 0.6 로 그리디 클러스터링 (같은 사건 다른 출처 자동 병합)
        ④ 클러스터 중 "출처가 많은 이슈"를 우선, 각 클러스터의 최신·출처 다양성 대표 기사 선택
        ⑤ 카테고리 전체에서 기사 3건을 뽑아 (pick_top_articles)
        ⑥ 기사 3건 각각 OpenAI gpt-5-nano로 3줄 요약
@@ -22,15 +22,29 @@
        ⑧ Report 1행 + Article 3행을 DB에 저장, 대시보드 카드로 렌더
 ```
 
-**조회수 기준 아님.** 조회수는 Google News RSS가 API로 제공하지 않는다. 대신 "**Google이 뉴스 큐레이션 알고리즘으로 RSS 피드 상단에 올려 보내는 순서**"와 "**같은 이슈를 다룬 언론사 수(= 클러스터 크기)**"를 중요도 신호로 사용한다.
+**조회수 기준 아님.** 조회수는 RSS 피드가 API로 제공하지 않는다. 대신 "**피드 상단에 올라오는 순서(= 편집권 반영된 최신성)**"와 "**같은 이슈를 다룬 언론사 수(= 클러스터 크기, 다수 소스로 교차 검증)**"를 중요도 신호로 사용한다.
 
 ---
 
-## 1. 소스: Google News RSS 한 가지만 사용
+## 1. 소스: 3개 RSS 병렬 수집 (Day 5 확장)
 
-### 왜 하나만?
-- 서울신문 과제 마감(4/21)까지 API 키 발급 시간을 아끼기 위해 "키 불필요 / 무료 / 바로 한국어 쿼리 가능"한 Google News RSS 단일 소스로 축소함.
-- 확장 포인트는 남겨둠: `collector.py`에 `NaverNewsClient`, `NewsAPIClient`를 **같은 `RawArticle` dataclass를 반환하는 클래스**로 추가만 하면 그 아래 전처리/분석 파이프라인은 그대로 동작.
+### 왜 다중 소스?
+- 단일 소스(Google News RSS)는 aggregator로서 이미 여러 국내 언론사를 커버하지만, **Google News 자체가 다운/레이트리밋 걸리면 전체 파이프라인이 멈추는 단일 장애점**이었다 (Day 5 실기기 검증 중 1/6 카테고리만 성공한 사례).
+- 국내 공영 통신사(연합뉴스)와 과제 주최사(서울신문)의 RSS를 직접 추가해 **소스 다양성 + 가용성**을 동시에 확보. 한 소스가 실패해도 나머지로 진행.
+- 과제 주최사인 서울신문 RSS를 1차 수집원에 포함시킨 것 자체가 테마적 의미 포인트.
+
+### 엔드포인트
+
+| 소스 | 클래스 | URL 템플릿 | 키 | 비고 |
+|---|---|---|---|---|
+| Google News | `GoogleRSSClient` | `https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko` | ❌ | aggregator (한겨레/조선/경향/중앙 등 자동 포함) |
+| 연합뉴스 | `YonhapRSSClient` | `https://www.yna.co.kr/rss/{slug}.xml` | ❌ | 공영 통신사 직접 피드. IT/과학은 `industry.xml`로 대체 |
+| 서울신문 | `SeoulNewsRSSClient` | `https://www.seoul.co.kr/xml/rss/rss_{slug}.xml` | ❌ | 과제 주최사 직접 피드. IT/과학 전용 피드 없어 skip |
+
+`MultiSourceCollector`가 3개를 순차 호출하고 URL 기반 dedupe 후 TF-IDF 단계로 전달. 공용 `_fetch_rss_url()` 헬퍼가 20초 timeout + 최대 3회 재시도 + 선형 backoff 적용.
+
+### 확장 포인트
+`collector.py`에 `NaverNewsClient`, `NewsAPIClient` 등 추가 클래스를 같은 `.fetch(category) -> list[RawArticle]` 인터페이스로 만들고 `MultiSourceCollector.__init__`의 기본 clients 목록에 넣으면 파이프라인 변경 없이 소스만 확장 가능.
 
 ### 엔드포인트
 ```
