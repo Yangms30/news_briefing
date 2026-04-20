@@ -126,7 +126,7 @@ def _upload_audio_to_slack(
     report: Report,
     mp3_bytes: bytes,
 ) -> tuple[bool, str | None]:
-    """files.upload_v2 3-step flow: getUploadURLExternal → PUT bytes → completeUploadExternal.
+    """files.upload_v2 3-step flow for a single report's mp3.
 
     Returns (ok, error_message).
     """
@@ -144,7 +144,7 @@ def _upload_audio_to_slack(
     if not upload_url or not file_id:
         return False, "getUploadURL missing upload_url/file_id"
 
-    # Step 2: PUT (actually POST in Slack docs) the bytes to that URL.
+    # Step 2: POST bytes to returned URL.
     try:
         r2 = httpx.post(upload_url, content=mp3_bytes, timeout=_BOT_TIMEOUT)
     except httpx.HTTPError as exc:
@@ -152,7 +152,7 @@ def _upload_audio_to_slack(
     if r2.status_code >= 400:
         return False, f"upload bytes http {r2.status_code}"
 
-    # Step 3: complete + share (with thread_ts → appears as thread reply).
+    # Step 3: complete + share (thread_ts → appears as thread reply).
     body: dict[str, Any] = {
         "files": [{"id": file_id, "title": f"{report.category} 라디오"}],
         "channel_id": channel_id,
@@ -165,8 +165,14 @@ def _upload_audio_to_slack(
     return True, None
 
 
-def _send_bot(token: str, channel_id: str, user_name: str, reports: list[Report]) -> tuple[str, str | None]:
-    # Step A: post the report as the parent message
+def _send_bot(
+    token: str,
+    channel_id: str,
+    user_name: str,
+    reports: list[Report],
+    tts_engine: str | None = None,
+) -> tuple[str, str | None]:
+    # Step A: post the report as the parent message (text + blocks).
     post = _slack_api_post(
         "chat.postMessage",
         token,
@@ -182,14 +188,16 @@ def _send_bot(token: str, channel_id: str, user_name: str, reports: list[Report]
         return "failed", f"chat.postMessage: {err}"
     thread_ts = post.get("ts")
 
-    # Step B: synthesize + attach each report's mp3 as a threaded reply.
+    # Step B: synthesize + upload each report's mp3 as a threaded reply.
+    # One file per category so users can skim by section; Slack renders
+    # each file with an inline audio player.
     uploaded = 0
     failures: list[str] = []
     for r in reports:
         if not (r.radio_script or "").strip():
             continue
         try:
-            path = synthesize_to_file(r)
+            path = synthesize_to_file(r, engine=tts_engine)
         except TTSUnavailable as exc:
             logger.warning("slack: TTS unavailable for report_id=%s: %s", r.id, exc)
             failures.append(f"{r.category}: TTS unavailable")
@@ -211,15 +219,15 @@ def _send_bot(token: str, channel_id: str, user_name: str, reports: list[Report]
             failures.append(f"{r.category}: {err}")
 
     logger.info(
-        "slack bot: uploaded %d/%d mp3(s), %d failures",
+        "slack bot: uploaded %d/%d mp3(s), %d failures (engine=%s)",
         uploaded,
         sum(1 for r in reports if (r.radio_script or "").strip()),
         len(failures),
+        tts_engine or "auto",
     )
-    # Partial-failure policy: the parent message was posted successfully; treat
-    # the whole dispatch as success if at least the text landed. Per-file
-    # failures are logged but don't flip the channel's status so one flaky
-    # mp3 doesn't mask the fact that the user's reports did reach Slack.
+    # Parent text message landed — treat the whole dispatch as a success.
+    # Per-file upload failures are logged but don't flip the channel's
+    # status so one flaky mp3 doesn't mask a delivered report.
     if failures and uploaded == 0:
         return "failed", "; ".join(failures[:3])
     return "success", None
@@ -232,7 +240,12 @@ class SlackSender:
     """Facade that picks webhook vs bot-token mode from the config dict."""
 
     @staticmethod
-    def send(config: Any, user_name: str, reports: list[Report]) -> tuple[str, str | None]:
+    def send(
+        config: Any,
+        user_name: str,
+        reports: list[Report],
+        tts_engine: str | None = None,
+    ) -> tuple[str, str | None]:
         if not reports:
             return "skipped", "no reports to send"
 
@@ -251,7 +264,7 @@ class SlackSender:
                     return "failed", "invalid bot token"
                 if not isinstance(channel_id, str) or not channel_id.strip():
                     return "failed", "invalid channel_id"
-                return _send_bot(token, channel_id.strip(), user_name, reports)
+                return _send_bot(token, channel_id.strip(), user_name, reports, tts_engine)
             if mode == "webhook":
                 url = config.get("url")
                 if not isinstance(url, str) or not url.startswith("http"):

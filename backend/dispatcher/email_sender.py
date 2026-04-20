@@ -111,18 +111,21 @@ def _render_text(user_name: str, reports: list[Report]) -> str:
 
 def _synthesize_audio_for_reports(
     reports: list[Report],
+    tts_engine: str | None = None,
 ) -> list[tuple[Report, bytes]]:
     """Return (report, mp3_bytes) pairs for each report that produced audio.
 
     Skips reports without a radio_script and any whose TTS call fails so the
-    rest of the email still goes through.
+    rest of the email still goes through. `tts_engine` forwards the user's
+    Settings preference so email attachments match what the dashboard radio
+    player would produce.
     """
     results: list[tuple[Report, bytes]] = []
     for r in reports:
         if not (r.radio_script or "").strip():
             continue
         try:
-            path = synthesize_to_file(r)
+            path = synthesize_to_file(r, engine=tts_engine)
         except TTSUnavailable as exc:
             logger.warning("email: TTS unavailable for report_id=%s: %s", r.id, exc)
             continue
@@ -139,7 +142,12 @@ def _synthesize_audio_for_reports(
 
 class EmailSender:
     @staticmethod
-    def send(to_email: str, user_name: str, reports: list[Report]) -> tuple[str, str | None]:
+    def send(
+        to_email: str,
+        user_name: str,
+        reports: list[Report],
+        tts_engine: str | None = None,
+    ) -> tuple[str, str | None]:
         cfg = get_settings()
         if not cfg.SMTP_USER or not cfg.SMTP_PASSWORD:
             return "failed", "SMTP credentials not configured"
@@ -150,7 +158,7 @@ class EmailSender:
 
         # Synthesize audio first so the HTML body can accurately state the
         # attachment count (or skip the badge if all synthesis failed).
-        audio_pairs = _synthesize_audio_for_reports(reports)
+        audio_pairs = _synthesize_audio_for_reports(reports, tts_engine)
         audio_count = len(audio_pairs)
 
         msg = EmailMessage()
@@ -169,9 +177,10 @@ class EmailSender:
                 filename=_mp3_filename(r),
             )
         logger.info(
-            "email: prepared %d mp3 attachments out of %d reports",
+            "email: prepared %d mp3 attachments out of %d reports (engine=%s)",
             audio_count,
             len(reports),
+            tts_engine or "auto",
         )
 
         ctx = ssl.create_default_context()

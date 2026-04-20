@@ -97,13 +97,20 @@ def dispatch_user_reports(db: Session, user_id: int) -> list[ChannelResult]:
     dispatch_id = uuid.uuid4().hex
     report_ids_json = json.dumps([r.id for r in reports])
 
+    # Honor the user's TTS engine preference end-to-end so the audio
+    # attached to email + slack matches the engine they'd hear on the
+    # dashboard radio player. Falls back to auto-select when unset.
+    tts_engine = channels.get("tts_engine") if isinstance(channels, dict) else None
+    if tts_engine not in ("elevenlabs", "openai"):
+        tts_engine = None
+
     results: list[ChannelResult] = []
     for name, target in active:
         if name == "web":
             status, err = WebSender.send(reports)
             recipient: str | None = "web"
         elif name == "slack":
-            status, err = SlackSender.send(target, user.name, reports)
+            status, err = SlackSender.send(target, user.name, reports, tts_engine=tts_engine)
             # Snapshot recipient: channel_id for bot mode, webhook URL for webhook.
             if isinstance(target, dict):
                 if target.get("mode") == "bot":
@@ -113,7 +120,7 @@ def dispatch_user_reports(db: Session, user_id: int) -> list[ChannelResult]:
             else:
                 recipient = str(target)
         elif name == "email":
-            status, err = EmailSender.send(str(target), user.name, reports)
+            status, err = EmailSender.send(str(target), user.name, reports, tts_engine=tts_engine)
             recipient = str(target)
         else:
             continue
