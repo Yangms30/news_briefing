@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from models import Article, Report
+from models import Article, Report, Setting
 from pipeline.service import generate_reports_for_user
 from schemas import ArticleOut, ReportGenerateResponse, ReportOut
 from services.tts import TTSUnavailable, synthesize_to_file
@@ -80,19 +80,39 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{report_id}/audio")
-def get_report_audio(report_id: int, db: Session = Depends(get_db)):
-    """Stream the mp3 for this report's radio_script (OpenAI gpt-4o-mini-tts).
+def get_report_audio(
+    report_id: int,
+    engine: str | None = Query(None, description="'elevenlabs' | 'openai' — overrides user setting"),
+    db: Session = Depends(get_db),
+):
+    """Stream the mp3 for this report's radio_script.
 
-    Lazy synthesis + disk cache. First call takes a few seconds; subsequent
-    calls serve the cached file instantly.
+    Engine resolution order:
+      1. explicit ?engine= query param (debug / admin override)
+      2. user's Settings.channels.tts_engine
+      3. auto (ElevenLabs if configured, else OpenAI fallback)
     """
     r = db.query(Report).filter(Report.id == report_id).first()
     if not r:
         raise HTTPException(404, "Report not found")
     if not (r.radio_script or "").strip():
         raise HTTPException(404, "Report has no radio_script")
+
+    # If the caller didn't force an engine, check the owning user's preference.
+    chosen_engine = engine
+    if not chosen_engine:
+        setting = db.query(Setting).filter(Setting.user_id == r.user_id).first()
+        if setting and setting.channels:
+            try:
+                channels = json.loads(setting.channels)
+                pref = channels.get("tts_engine")
+                if isinstance(pref, str) and pref in ("elevenlabs", "openai"):
+                    chosen_engine = pref
+            except json.JSONDecodeError:
+                pass
+
     try:
-        path: Path = synthesize_to_file(r)
+        path: Path = synthesize_to_file(r, engine=chosen_engine)
     except TTSUnavailable as exc:
         raise HTTPException(503, f"TTS unavailable: {exc}")
     return FileResponse(

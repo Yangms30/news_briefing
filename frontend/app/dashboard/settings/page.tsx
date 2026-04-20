@@ -81,6 +81,7 @@ export default function SettingsPage() {
     botToken: "",
     channelId: "",
   })
+  const [ttsEngine, setTtsEngine] = useState<"elevenlabs" | "openai">("elevenlabs")
 
   useEffect(() => {
     let cancelled = false
@@ -120,6 +121,9 @@ export default function SettingsPage() {
               botToken: ch.slack_bot_token ?? "",
               channelId: ch.slack_channel_id ?? "",
             })
+            if (ch.tts_engine === "openai" || ch.tts_engine === "elevenlabs") {
+              setTtsEngine(ch.tts_engine)
+            }
           }
         } else {
           setEmail({ enabled: false, address: user.email })
@@ -148,7 +152,7 @@ export default function SettingsPage() {
       toast.error("카테고리를 최소 1개 이상 선택해주세요.")
       return
     }
-    const channels: ChannelConfig = { web: true }
+    const channels: ChannelConfig = { web: true, tts_engine: ttsEngine }
     if (email.enabled && email.address.trim()) channels.email = email.address.trim()
     if (slack.enabled) {
       if (slack.mode === "bot") {
@@ -464,8 +468,64 @@ export default function SettingsPage() {
 
           <section>
             <h2 className="mb-4 text-lg font-semibold">AI 모델</h2>
-            <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-              현재 OpenAI gpt-5-nano 모델을 사용합니다. (설정 변경 미지원)
+            <div className="space-y-3">
+              <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                <div className="font-medium text-foreground mb-1">텍스트 분석</div>
+                OpenAI <code className="text-xs">gpt-5-nano</code> 고정 (과제 조건 충족용).
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="font-medium mb-1">라디오 음성 엔진</div>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  리포트를 mp3로 합성할 TTS 엔진을 고르세요. 엔진별 캐시가
+                  분리돼 있어 변경해도 기존 파일은 유지됩니다.
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setTtsEngine("elevenlabs")}
+                    className={`rounded-lg border px-3 py-3 text-left text-sm transition-all ${
+                      ttsEngine === "elevenlabs"
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:border-primary/50"
+                    }`}
+                  >
+                    <div className="font-medium flex items-center gap-1.5">
+                      ElevenLabs
+                      {ttsEngine === "elevenlabs" && (
+                        <span className="text-[10px] text-primary">✓ 선택됨</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      자연스러운 음성 · 월 10K자 무료
+                      <br />
+                      (품질 우선 · 시연·발표용)
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTtsEngine("openai")}
+                    className={`rounded-lg border px-3 py-3 text-left text-sm transition-all ${
+                      ttsEngine === "openai"
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:border-primary/50"
+                    }`}
+                  >
+                    <div className="font-medium flex items-center gap-1.5">
+                      OpenAI TTS
+                      {ttsEngine === "openai" && (
+                        <span className="text-[10px] text-primary">✓ 선택됨</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      <code className="text-[11px]">gpt-4o-mini-tts</code> ·
+                      pay-per-use
+                      <br />
+                      (리허설용 · ElevenLabs 한도 아낌)
+                    </div>
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

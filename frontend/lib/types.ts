@@ -19,6 +19,13 @@ export type ChannelConfig = {
   /** Slack channel id (e.g. "C01234567") — required alongside slack_bot_token. */
   slack_channel_id?: string
   email?: string
+  /**
+   * TTS engine preference. Controls which provider renders the radio script
+   * into audio for this user. "elevenlabs" = high-quality (default, uses
+   * monthly quota). "openai" = gpt-4o-mini-tts (pay-per-use, useful for
+   * rehearsals to preserve ElevenLabs quota).
+   */
+  tts_engine?: "elevenlabs" | "openai"
 }
 
 export type Setting = {

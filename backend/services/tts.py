@@ -46,8 +46,10 @@ def _cache_dir() -> Path:
     return p
 
 
-def _cache_path(report_id: int) -> Path:
-    return _cache_dir() / f"{report_id}.mp3"
+def _cache_path(report_id: int, engine: str) -> Path:
+    # Engine-scoped cache path so switching engines doesn't require wiping
+    # the cache dir — each engine's output lives side by side in its own file.
+    return _cache_dir() / f"{report_id}.{engine}.mp3"
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -147,28 +149,57 @@ def _synthesize_openai(script: str, report: Report, path: Path) -> Path:
 # ---------- Public entry point ----------
 
 
-def synthesize_to_file(report: Report) -> Path:
+def _resolve_engine(requested: str | None) -> str:
+    """Decide which engine to use.
+
+    - "elevenlabs" or "openai": explicit request — honored as-is (no fallback).
+      If the required key is missing, synthesis raises TTSUnavailable so the
+      user's preference isn't silently overridden.
+    - None / "auto": prefer ElevenLabs when configured, else OpenAI (legacy
+      behavior for callers that don't care).
+    """
+    cfg = get_settings()
+    if requested in ("elevenlabs", "openai"):
+        return requested
+    if cfg.ELEVENLABS_API_KEY:
+        return "elevenlabs"
+    if cfg.OPENAI_API_KEY:
+        return "openai"
+    raise TTSUnavailable(
+        "No TTS provider configured — set ELEVENLABS_API_KEY (preferred) or OPENAI_API_KEY"
+    )
+
+
+def synthesize_to_file(report: Report, engine: str | None = None) -> Path:
     """Return an mp3 Path for this report's radio_script.
 
+    Args:
+        report: the Report whose radio_script should be rendered.
+        engine: "elevenlabs" | "openai" | None (auto-select). Explicit values
+            are respected strictly — no silent fallback — so the caller's
+            choice (e.g. the user's Settings preference) is the final word.
+
     Raises:
-        TTSUnavailable: no provider configured, or every configured provider
-        failed to synthesize this particular report.
+        TTSUnavailable: no provider configured / missing key for the requested
+        engine / provider API error / empty radio_script.
     """
     cfg = get_settings()
     script = (report.radio_script or "").strip()
     if not script:
         raise TTSUnavailable("radio_script is empty")
 
-    path = _cache_path(report.id)
+    resolved = _resolve_engine(engine)
+    path = _cache_path(report.id, resolved)
     if path.exists() and path.stat().st_size > 0:
-        logger.info("tts cache hit report_id=%s", report.id)
+        logger.info("tts cache hit report_id=%s engine=%s", report.id, resolved)
         return path
 
-    # Provider selection: ElevenLabs first, OpenAI as fallback.
-    if cfg.ELEVENLABS_API_KEY:
+    if resolved == "elevenlabs":
+        if not cfg.ELEVENLABS_API_KEY:
+            raise TTSUnavailable("ELEVENLABS_API_KEY not set")
         return _synthesize_elevenlabs(script, report, path)
-    if cfg.OPENAI_API_KEY:
+    if resolved == "openai":
+        if not cfg.OPENAI_API_KEY:
+            raise TTSUnavailable("OPENAI_API_KEY not set")
         return _synthesize_openai(script, report, path)
-    raise TTSUnavailable(
-        "No TTS provider configured — set ELEVENLABS_API_KEY (preferred) or OPENAI_API_KEY"
-    )
+    raise TTSUnavailable(f"unknown engine: {resolved}")
