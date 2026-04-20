@@ -375,9 +375,155 @@ for i, j in pairs(picked):
 
 ---
 
-## 4. 숫자로 보는 효과
+## 4. 수집 소스 신뢰성 — 발표용 검증 가이드
 
-### 4.1 데이터 플로우 (정치 카테고리 실측 기준)
+발표 중 심사자가 "크롤링 아닌 게 맞아요?" / "정말 서울신문에 직접 접속해요?" 같은 질문을 던질 때를 대비한 **즉석 검증 메뉴**. 동일한 사실을 **4가지 다른 각도**에서 보여줄 수 있어 어느 하나 거짓이면 다른 것과 안 맞는다는 구조적 증거가 된다.
+
+### 4.1 "직접 접속 2곳 + 간접 수집 수십 곳"의 정확한 구분
+
+| 언론사 | 접속 방식 | 코드 위치 |
+|---|---|---|
+| **연합뉴스** | ✅ 본사 RSS **직접** | `collector.py:227` `YonhapRSSClient.URL_TEMPLATE` |
+| **서울신문** | ✅ 본사 RSS **직접** | `collector.py:285` `SeoulNewsRSSClient.URL_TEMPLATE` |
+| 조선·중앙·한겨레·경향 등 주요지 | 간접 (Google News aggregator + 네이버 검색 API 경유) | `collector.py:170` `GoogleRSSClient`, `collector.py:421` `NaverSearchClient` |
+| 서신 서버가 크롤링하는 곳 | **없음** | — |
+
+### 4.2 각 소스의 공개 엔드포인트 전체 표
+
+**연합뉴스 RSS** (카테고리별):
+
+| 카테고리 | URL |
+|---|---|
+| 정치 | `https://www.yna.co.kr/rss/politics.xml` |
+| 경제 | `https://www.yna.co.kr/rss/economy.xml` |
+| 사회 | `https://www.yna.co.kr/rss/society.xml` |
+| 국제 | `https://www.yna.co.kr/rss/international.xml` |
+| 스포츠 | `https://www.yna.co.kr/rss/sports.xml` |
+| IT/과학 (산업으로 대체) | `https://www.yna.co.kr/rss/industry.xml` |
+
+**서울신문 RSS** (카테고리별):
+
+| 카테고리 | URL |
+|---|---|
+| 정치 | `https://www.seoul.co.kr/xml/rss/rss_politics.xml` |
+| 경제 | `https://www.seoul.co.kr/xml/rss/rss_economy.xml` |
+| 사회 | `https://www.seoul.co.kr/xml/rss/rss_society.xml` |
+| 국제 | `https://www.seoul.co.kr/xml/rss/rss_international.xml` |
+| 스포츠 | `https://www.seoul.co.kr/xml/rss/rss_sports.xml` |
+| IT/과학 | (전용 피드 없음, skip — Google News + Naver가 커버) |
+
+**Google News RSS**:
+```
+https://news.google.com/rss/search?q={쿼리}&hl=ko&gl=KR&ceid=KR:ko
+```
+예: 정치 → `q=정치%20OR%20국회%20OR%20대통령`
+
+**네이버 검색 API**:
+```
+POST https://openapi.naver.com/v1/search/news.json
+Headers: X-Naver-Client-Id, X-Naver-Client-Secret
+Query:   ?query={단순 키워드}&display=40&sort=date
+```
+
+### 4.3 검증 방법 ① — 브라우저에서 직접 열기 (가장 직관적)
+
+주소창에 RSS URL 붙여넣기만 하면 됩니다. 예:
+
+```
+https://www.yna.co.kr/rss/politics.xml
+```
+
+Chrome/Safari가 XML 그대로 렌더. 각 `<item>`이 기사 하나이고, 맨 위 `<channel>`에 언론사 이름과 저작권이 명시돼 있습니다.
+
+**시연용 한 줄 멘트**:
+> "이게 연합뉴스 본사가 공식 공개하는 실시간 정치 피드입니다. 누구나 이 주소에 접속 가능해요. 서신은 여기에 HTTP GET만 보내서 XML을 파싱합니다."
+
+### 4.4 검증 방법 ② — 터미널에서 curl로 직접 호출
+
+```bash
+curl -sA "Mozilla/5.0" https://www.yna.co.kr/rss/politics.xml | head -c 1500
+```
+
+응답 앞부분에서 확인 가능한 핵심 포인트:
+- `<title>연합뉴스 정치 최신기사</title>` — 피드 소유자 명시
+- `<copyright>저작권자(c) 연합뉴스, 무단 전재-재배포, AI 학습 및 활용 금지</copyright>` — 출처 공식 선언
+- `<pubDate>Mon, 20 Apr 2026 16:53:03 +0900</pubDate>` — 실시간 업데이트
+- `<sy:updatePeriod>hourly</sy:updatePeriod>` — 갱신 주기 (연합은 매시)
+
+서울신문도 같은 구조:
+- `<title>서울신문</title>`
+- `<description>서울신문 - RSS 서비스</description>`
+- `<link>https://www.seoul.co.kr/news/newsView.php?id=...</link>` — 실제 기사 URL
+
+### 4.5 검증 방법 ③ — uvicorn 실시간 로그 (⭐ 발표 killer)
+
+`uvicorn main:app --reload --port 8765` 로 백엔드 띄워놓은 터미널 한 쪽에 띄워두고, 대시보드에서 **"지금 리포트 받기"** 누르면 이 로그가 **실시간으로** 찍힙니다:
+
+```
+INFO httpx — HTTP Request: GET https://news.google.com/rss/search?q=... "HTTP/1.1 200 OK"
+INFO pipeline.collector — [google] collected 20 articles for category=정치
+INFO httpx — HTTP Request: GET https://www.yna.co.kr/rss/politics.xml "HTTP/1.1 200 OK"
+INFO pipeline.collector — [yonhap] collected 20 articles for category=정치
+INFO httpx — HTTP Request: GET https://www.seoul.co.kr/xml/rss/rss_politics.xml "HTTP/1.1 200 OK"
+INFO pipeline.collector — [seoul] collected 12 articles for category=정치
+INFO httpx — HTTP Request: GET https://openapi.naver.com/v1/search/news.json?... "HTTP/1.1 200 OK"
+INFO pipeline.collector — [naver] collected 20 articles for category=정치
+INFO pipeline.collector — multi-source collected category=정치 total=72 deduped=72 breakdown={'google': 20, 'yonhap': 20, 'seoul': 12, 'naver': 20}
+```
+
+**심사자가 보는 것**:
+1. 서신이 실제로 연합뉴스 서버(`yna.co.kr`)에 HTTP GET을 보낸다
+2. 그 서버가 `200 OK` 로 응답한다
+3. 그 응답에서 20개 기사를 파싱했다
+
+**4개 소스 모두 `200 OK`로 찍히는 화면**이 발표에서 가장 강력한 시각 증거.
+
+### 4.6 검증 방법 ④ — 소스 코드에서 URL 하드코딩 확인
+
+크롤링이 아니라면 소스 코드에 URL이 어딘가 고정되어 있어야 합니다.
+
+```bash
+grep -n "URL_TEMPLATE\|ENDPOINT" backend/pipeline/collector.py
+```
+
+출력:
+```
+collector.py:227  URL_TEMPLATE = "https://www.yna.co.kr/rss/{slug}.xml"
+collector.py:285  URL_TEMPLATE = "https://www.seoul.co.kr/xml/rss/rss_{slug}.xml"
+collector.py:422  ENDPOINT = "https://openapi.naver.com/v1/search/news.json"
+```
+
+VS Code에서 해당 라인 열어 하이라이트 보여주면 **"이것 말고 다른 경로로 접속하는 코드는 없다"**는 negative evidence까지 제공 가능.
+
+### 4.7 저작권·합법성 보너스 포인트
+
+RSS는 의도적으로 **제한된 메타데이터만** 제공:
+- `<title>` (제목)
+- `<description>` (짧은 요약)
+- `<link>` (원문 URL)
+
+**기사 전문(본문) 없음**. 이 덕에:
+- 저작권 제약 없음 (공개 메타데이터만 사용)
+- 사용자가 "원문 보기" 누르면 원 언론사 사이트로 이동 → 언론사 **트래픽/광고 수익에 기여**
+- 상생 구조. 크롤링은 이 어필 불가능.
+
+### 4.8 발표 시연 체크리스트 (3분 분량)
+
+| 시간 | 행동 | 기대 효과 |
+|---|---|---|
+| 0:00~0:30 | 브라우저 주소창에 `yna.co.kr/rss/politics.xml` 직접 입력 → XML 렌더 보여줌 | "공개 피드 맞네" 즉각 인지 |
+| 0:30~1:00 | 서울신문 URL도 동일하게 시연 | 두 번째 확인 |
+| 1:00~2:00 | VS Code 터미널에 uvicorn 띄워놓고 대시보드에서 "지금 리포트 받기" 클릭 → 로그 4줄 찍히는 순간 강조 | 실시간 요청 발생 증거 |
+| 2:00~2:30 | VS Code에서 `collector.py:227`, `:285` 열어 URL 하드코딩 하이라이트 | 코드 수준 증거 |
+| 2:30~3:00 | 한 줄 마무리: "4개 소스 · 크롤링 0% · 저작권 완비" | 메시지 고정 |
+
+리허설 2회만 돌려두시면 현장에서 자연스럽게 흘러갑니다.
+
+---
+
+## 5. 숫자로 보는 효과
+
+### 5.1 데이터 플로우 (정치 카테고리 실측 기준)
 
 ```
 [수집]                   [dedup]            [클러스터링]        [선별]
@@ -387,7 +533,7 @@ Google    20건   ─┐
 (네이버    20건) ─┘                                              LLM
 ```
 
-### 4.2 비용 효율
+### 5.2 비용 효율
 
 ```
 순진한 방법: 60건 전부 LLM 요약
@@ -400,7 +546,7 @@ Google    20건   ─┐
       비용 절감: 95%
 ```
 
-### 4.3 품질 Signal
+### 5.3 품질 Signal
 
 | Signal | 의미 |
 |---|---|
@@ -410,7 +556,7 @@ Google    20건   ─┐
 
 ---
 
-## 5. 설계 결정 요약 (Q&A 대비)
+## 6. 설계 결정 요약 (Q&A 대비)
 
 | 질문 | 답변 |
 |---|---|
@@ -423,9 +569,9 @@ Google    20건   ─┐
 
 ---
 
-## 6. 한계 및 향후 확장
+## 7. 한계 및 향후 확장
 
-### 6.1 현재 한계
+### 7.1 현재 한계
 
 1. **통계적 유사도의 한계**
    - "금리 인하"와 "기준금리 25bp 인하"는 TF-IDF로 비슷하지만, "경기 부양"과 "금리 인하"의 인과 관계는 못 포착 (임베딩 모델이 잘함)
@@ -436,7 +582,7 @@ Google    20건   ─┐
 3. **Greedy의 순서 의존**
    - 완벽한 최적 클러스터링 아님 (hierarchical clustering은 더 나음)
 
-### 6.2 확장 방향
+### 7.2 확장 방향
 
 | 확장 | 효과 | 비용 |
 |---|---|---|
@@ -451,7 +597,7 @@ Google    20건   ─┐
 
 ---
 
-## 7. 발표 스크립트 (2분 핵심 메시지)
+## 8. 발표 스크립트 (2분 핵심 메시지)
 
 > "서신의 핵심은 **수십 건의 뉴스 중 주요 이슈를 자동 판별하는 알고리즘**입니다.
 >
@@ -469,7 +615,7 @@ Google    20건   ─┐
 
 ---
 
-## 8. 코드 위치 빠른 참조
+## 9. 코드 위치 빠른 참조
 
 | 기능 | 파일 | 함수/클래스 |
 |---|---|---|
