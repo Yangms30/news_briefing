@@ -31,7 +31,12 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:3000"
 
     COLLECT_PER_CATEGORY: int = 20
-    CLUSTER_THRESHOLD: float = 0.6
+    # NOTE: preprocessor.cluster_articles() uses 0.45 as its own default.
+    # This env-var override path is kept for tuning without code edits, but
+    # the shipped value there (0.45) is the tuned default after title-normalization
+    # + bigram + sublinear_tf upgrades. Leave at 0.45 unless you change the
+    # vectorization settings.
+    CLUSTER_THRESHOLD: float = 0.45
     ARTICLE_HOURS: int = 24
 
     SMTP_HOST: str = "smtp.gmail.com"
