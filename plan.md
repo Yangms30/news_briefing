@@ -35,7 +35,7 @@
 | **LLM (메인)** | OpenAI `gpt-5-nano` | 경량 모델, 저비용 고성능 | ✅ 구현 완료 (`OpenAIAnalyzer`) |
 | **LLM (레거시)** | Gemini 2.5 Flash Lite | `gemini-2.5-flash-lite` | ♻️ 클래스 유지(`GeminiAnalyzer`), 현재 미사용 |
 | **스케줄러** | APScheduler | FastAPI 프로세스 내장 | ⚠️ **데모 기간 의도적 비활성화** (LLM 비용 통제, `main.py` lifespan 주석처리) — 코드 자체는 완성 |
-| **뉴스 소스** | Google News + 연합뉴스 + 서울신문 RSS (다중) | `feedparser` 병렬 수집 + URL dedupe + 소스별 20건/24h. 한 소스 실패해도 나머지로 진행 | ✅ 구현 완료 (Day 5 확장) |
+| **뉴스 소스** | Google News + 연합뉴스 + 서울신문 RSS + **네이버 검색 API** (4중) | 병렬 수집 + URL/title 두 단계 dedupe + 소스별 20건/24h. 한 소스 실패해도 나머지로 진행 | ✅ 구현 완료 (Day 5 확장) |
 | **~~네이버/NewsAPI~~** | (키 미발급으로 보류) | 추후 확장 포인트 | ⬜ 미적용 |
 | **이메일 발송** | SMTP (Gmail App Password) | 반응형 HTML 템플릿 | ✅ 구현 완료 (.env 키만 채우면 동작) |
 | **Slack 발송** | Incoming Webhook | Block Kit JSON | ✅ 구현 완료 (Webhook URL 설정 시 동작) |

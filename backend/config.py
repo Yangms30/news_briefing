@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: str = ""
     ELEVENLABS_VOICE_ID: str = ""
     ELEVENLABS_MODEL_ID: str = "eleven_multilingual_v2"
+    # 네이버 검색 API (뉴스 수집 4번째 소스). 둘 다 비어있으면 NaverSearchClient
+    # 는 no-op로 동작하고 나머지 3개 소스만 사용됨.
+    NAVER_CLIENT_ID: str = ""
+    NAVER_CLIENT_SECRET: str = ""
     AUDIO_CACHE_DIR: str = "./media/audio"
     LLM_MAX_RETRIES: int = 2
 

@@ -2,10 +2,11 @@
 - Google News RSS (aggregator across many Korean outlets)
 - 연합뉴스 (Yonhap) RSS — 국내 최대 공영 통신사, 카테고리별 feed
 - 서울신문 RSS — 과제 주최사, 카테고리별 feed
+- 네이버 검색 API — 포털 큐레이션 반영 (keys: NAVER_CLIENT_ID/SECRET)
 
 Each client exposes `fetch(category) -> list[RawArticle]` returning articles
 collected within the last `hours` window, capped at `per_category`. The
-pipeline fans out to all available clients and dedupes by URL before
+pipeline fans out to all available clients and dedupes by URL/title before
 handing off to the TF-IDF clustering stage, which handles content-level
 duplicates across sources.
 """
@@ -15,12 +16,16 @@ import re
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from html import unescape
 from time import mktime
 from typing import Iterable
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import feedparser
 import httpx
+
+from config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +322,204 @@ class SeoulNewsRSSClient:
         return articles
 
 
+# ---------- 네이버 검색 API ----------
+
+
+# Domain → Korean outlet name. Naver's Search API doesn't send a structured
+# `source` field, so we infer the publisher from the originallink host. Only
+# major outlets are here; unknowns fall back to the bare domain.
+_NAVER_DOMAIN_TO_SOURCE: dict[str, str] = {
+    "yna.co.kr": "연합뉴스",
+    "yonhapnews.co.kr": "연합뉴스",
+    "yonhapnewstv.co.kr": "연합뉴스TV",
+    "chosun.com": "조선일보",
+    "joongang.co.kr": "중앙일보",
+    "donga.com": "동아일보",
+    "hani.co.kr": "한겨레",
+    "khan.co.kr": "경향신문",
+    "seoul.co.kr": "서울신문",
+    "hankyung.com": "한국경제",
+    "mk.co.kr": "매일경제",
+    "newsis.com": "뉴시스",
+    "news1.kr": "뉴스1",
+    "ytn.co.kr": "YTN",
+    "kbs.co.kr": "KBS",
+    "sbs.co.kr": "SBS",
+    "imbc.com": "MBC",
+    "mbc.co.kr": "MBC",
+    "etnews.com": "전자신문",
+    "zdnet.co.kr": "ZDNet Korea",
+    "bloter.net": "블로터",
+    "inews24.com": "아이뉴스24",
+    "hankookilbo.com": "한국일보",
+    "segye.com": "세계일보",
+    "munhwa.com": "문화일보",
+    "kukinews.com": "쿠키뉴스",
+    "newspim.com": "뉴스핌",
+    "edaily.co.kr": "이데일리",
+    "sedaily.com": "서울경제",
+    "mt.co.kr": "머니투데이",
+    "sisajournal.com": "시사저널",
+    "ohmynews.com": "오마이뉴스",
+    "pressian.com": "프레시안",
+}
+
+
+def _source_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        return None
+    host = host.lower().lstrip("www.")
+    for suffix, name in _NAVER_DOMAIN_TO_SOURCE.items():
+        if host == suffix or host.endswith("." + suffix):
+            return name
+    # Fallback: first meaningful segment of the domain (e.g. "some-local-news")
+    parts = host.split(".")
+    return parts[0] if parts else None
+
+
+def _clean_naver_markup(text: str) -> str:
+    """Naver wraps matched keywords in <b>…</b> and HTML-encodes quotes/etc.
+    Strip both so the text enters TF-IDF and the user-visible title cleanly.
+    """
+    if not text:
+        return ""
+    # Remove keyword-highlight <b> tags specifically (leave other legit HTML
+    # alone for _strip_html to handle).
+    text = re.sub(r"</?b>", "", text, flags=re.IGNORECASE)
+    text = unescape(text)  # &quot; → ", &amp; → &, etc.
+    return _strip_html(text)
+
+
+def _parse_naver_pub_date(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        dt = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+class NaverSearchClient:
+    """네이버 뉴스 검색 API. 무료 25,000건/일.
+
+    Uses the same Korean-keyword queries as GoogleRSSClient so the results
+    are comparable, but sorts by "date" (newest first) and relies on the
+    `originallink` field to recover the publisher. Credentials come from
+    the env — if either is missing the client returns an empty list and
+    the other sources continue as usual (graceful degrade).
+    """
+
+    name = "naver"
+    ENDPOINT = "https://openapi.naver.com/v1/search/news.json"
+    # Naver 검색은 Google News 식 "A OR B" 연산자를 지원하지 않는다 (공백 =
+    # 암묵적 AND). 카테고리 의미가 충분히 분명한 단일 한국어 키워드를 써야
+    # 매칭이 제대로 잡힌다. 포털 큐레이션 자체가 분류를 돕기 때문에 단일
+    # 키워드만으로도 해당 카테고리 기사가 풍부하게 나옴.
+    CATEGORY_QUERIES: dict[str, str] = {
+        "정치": "정치",
+        "경제": "경제",
+        "사회": "사회",
+        "국제": "국제",
+        "스포츠": "스포츠",
+        "IT/과학": "IT 과학",
+    }
+
+    def __init__(
+        self,
+        hours: int = 24,
+        per_category: int = 20,
+        timeout: float = 15.0,
+        max_attempts: int = 3,
+        backoff_base: float = 1.0,
+    ):
+        cfg = get_settings()
+        self.client_id = cfg.NAVER_CLIENT_ID
+        self.client_secret = cfg.NAVER_CLIENT_SECRET
+        self.hours = hours
+        self.per_category = per_category
+        self.timeout = timeout
+        self.max_attempts = max_attempts
+        self.backoff_base = backoff_base
+
+    def fetch(self, category: str) -> list[RawArticle]:
+        if not self.client_id or not self.client_secret:
+            # No-op: keys not configured. Other clients still run.
+            return []
+
+        query = self.CATEGORY_QUERIES.get(category, category)
+        headers = {
+            "X-Naver-Client-Id": self.client_id,
+            "X-Naver-Client-Secret": self.client_secret,
+        }
+        params = {
+            "query": query,
+            # Naver's API max is 100 per call; pull extra so we can filter
+            # by the 24h window and still keep per_category items.
+            "display": max(self.per_category * 2, 30),
+            "start": 1,
+            "sort": "date",   # newest first
+        }
+
+        last_err: Exception | None = None
+        data = None
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                resp = httpx.get(self.ENDPOINT, params=params, headers=headers, timeout=self.timeout)
+                if resp.status_code == 401 or resp.status_code == 403:
+                    logger.warning("[%s] auth failed (%s) — check NAVER_CLIENT_ID/SECRET", self.name, resp.status_code)
+                    return []
+                if resp.status_code == 429:
+                    logger.warning("[%s] rate limited (attempt %d)", self.name, attempt)
+                    last_err = RuntimeError(f"http 429 {resp.text[:100]}")
+                else:
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+            except Exception as exc:
+                last_err = exc
+                logger.warning("[%s] fetch failed attempt %d/%d for %s: %s", self.name, attempt, self.max_attempts, category, exc)
+            if attempt < self.max_attempts:
+                time.sleep(self.backoff_base * attempt)
+
+        if data is None:
+            logger.warning("[%s] giving up on %s after %d attempts: %s", self.name, category, self.max_attempts, last_err)
+            return []
+
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=self.hours)
+        out: list[RawArticle] = []
+        for item in data.get("items") or []:
+            title = _clean_naver_markup(item.get("title", ""))
+            if not title:
+                continue
+            link = item.get("originallink") or item.get("link") or ""
+            description = _clean_naver_markup(item.get("description", ""))
+            pub = _parse_naver_pub_date(item.get("pubDate"))
+            if pub and pub < cutoff:
+                continue
+            out.append(
+                RawArticle(
+                    title=title,
+                    link=link,
+                    published=pub,
+                    source=_source_from_url(link),
+                    summary=description,
+                )
+            )
+            if len(out) >= self.per_category:
+                break
+        logger.info("[%s] collected %d articles for category=%s", self.name, len(out), category)
+        return out
+
+
 # ---------- Multi-source aggregator ----------
 
 
@@ -331,10 +534,13 @@ class MultiSourceCollector:
 
     def __init__(self, clients: Iterable[object] | None = None, hours: int = 24, per_category: int = 20):
         # `clients` anything with a .fetch(category) -> list[RawArticle]
+        # NaverSearchClient is included by default — if NAVER_CLIENT_ID/SECRET
+        # aren't set it silently returns [] so the other three sources still work.
         self.clients = list(clients) if clients is not None else [
             GoogleRSSClient(hours=hours, per_category=per_category),
             YonhapRSSClient(hours=hours, per_category=per_category),
             SeoulNewsRSSClient(hours=hours, per_category=per_category),
+            NaverSearchClient(hours=hours, per_category=per_category),
         ]
         self.hours = hours
         self.per_category = per_category
