@@ -4,21 +4,7 @@
 
 **서울신문 과제평가 제출작** · 최종 업데이트: 2026-04-21
 
-설계 원본 문서: [`plan.md`](./plan.md) · 클러스터링 심층 설명: [`docs/05-pipeline/clustering-deep-dive.md`](./docs/05-pipeline/clustering-deep-dive.md)
 
----
-
-## 과제 요건 충족 체크리스트
-
-| 요건 | 충족 | 증빙 |
-|---|:---:|---|
-| 공개 API/검색도구 실시간 수집 | ✅ | RSS 3종(연합뉴스·서울신문·Google News) + Naver Search API — `backend/pipeline/collector.py` |
-| 특정 채널 자동 보고 (Slack · 웹 · 이메일) | ✅ | 3채널 전부 구현 — `backend/dispatcher/` |
-| 웹 클라이언트 | ✅ | Next.js 16 App Router — `frontend/app/dashboard/` |
-| LLM API 백엔드에서만 호출 | ✅ | 프론트 번들 `grep` 결과 외부 LLM URL 0건 |
-| 제시 모델 중 하나 이상 사용 | ✅ | OpenAI `gpt-5-nano` (`backend/prompts/`) |
-| AI 도구 사용 명시 + 개발 플로우 | ✅ | 본 README + `plan.md` + 발표자료 `presentation-source.md` |
-| GitHub 또는 ZIP 제출 | ✅ | GitHub Public Repo |
 
 ---
 
@@ -125,11 +111,6 @@ briefBot/
 │   │   ├── radio-player-bar.tsx
 │   │   └── quick-actions.tsx
 │   └── lib/                         # types, api, briefing-display(parseUtcIso), ...
-├── docs/
-│   ├── 01-plan ~ 04-report          # PDCA 문서
-│   └── 05-pipeline/                 # clustering-deep-dive, news-collection-flow
-├── plan.md                          # 설계 원본 (소스 오브 트루스)
-├── presentation-source.md           # 발표자료 원본 (Claude cowork 입력용)
 ├── CLAUDE.md                        # 저장소 작업 가이드
 └── README.md
 ```
@@ -236,31 +217,9 @@ Naver 검색 API  ─┘   → 40~60건 unique            │   (문어체 + 재
 
 ---
 
-## 개발 현황 (2026-04-21 제출 기준)
-
-| 마일스톤 | 내용 | 상태 |
-|---------|------|------|
-| Day 1 (4/17 오전) | 백엔드 뼈대 + 파이프라인 E2E | ✅ |
-| Day 2 (4/17 오후) | 프론트 4개 페이지 실 API 연동 | ✅ |
-| Day 3 (4/17 밤) | Slack/Email dispatcher + APScheduler + SSE 진행 스트리밍 | ✅ |
-| Day 3 후속 | OpenAI gpt-5-nano 교체 + reports/articles 재설계 + 생성·발송 체이닝 | ✅ |
-| Day 4 (4/19) | 데모 유저 간소화, `plan.md` 재정합, Next.js 16 업그레이드 | ✅ |
-| Day 5 (4/20) | **4소스 확장**(Naver API) + **클러스터링 고도화**(0.45+bigram+post-select) + **이중 TTS**(ElevenLabs) + **이메일 mp3 첨부** + **Slack Bot Token 모드** + **보관함 페이지** + **날짜별 그룹 대시보드** + **스케줄러 활성 & 동적 오프셋** | ✅ |
-| 제출 (4/21) | 최종 점검 + README 정합성 + 저장소 이름 정리(seosin) | ✅ |
-
-**누적 검증 결과**
-- `POST /api/reports/generate?user_id=1` — 4소스 수집 → 클러스터링 → `gpt-5-nano` 2단 호출 → Report/Article 저장 → `radio_script` 포함 ✓
-- `GET /api/reports/generate/stream?user_id=1` — `start` ~ `done` SSE 정상 흐름 ✓
-- `POST /api/send?user_id=1` — web / email(mp3 첨부) / slack(bot 모드 인라인 오디오) 결과 반환 + `send_logs` 기록 ✓
-- `GET /api/dispatches?user_id=1` — 발송 이력 그룹 뷰 (채널 결과 + recipient 스냅샷) ✓
-- 스케줄러 — 예약 시각 기준 카테고리 수 × 1분 앞당겨 실행, 사용자 지정 시각에 도착 ✓
-- 프론트: `pnpm exec tsc --noEmit` pass, `pnpm exec next build` pass
-
----
-
 ## 설계 의사결정
 
-- **왜 OpenAI `gpt-5-nano`?** 과제 허용 모델 중 저비용 · 한국어 품질 균형. temperature 미지원 제약은 구조화 응답 프롬프트로 우회. 큰 모델을 쓰는 것보다 경량 모델을 프롬프트 설계로 짜내는 쪽이 실무에 가깝다 판단.
+- **왜 OpenAI `gpt-5-mini`?** 과제 허용 모델 중 저비용 · 한국어 품질 균형. temperature 미지원 제약은 구조화 응답 프롬프트로 우회. 큰 모델을 쓰는 것보다 경량 모델을 프롬프트 설계로 짜내는 쪽이 실무에 가깝다 판단.
 - **왜 TF-IDF 클러스터링?** 임베딩 API 비용 제로 + ms 단위 속도 + 재현성. 클러스터 크기 자체가 "몇 개 매체가 동시 보도했는가" 라는 공영 중요도 signal 이 되어 **LLM 호출 비용 95% 절감 + 품질 signal 강화** 동시 달성. `_article_text_for_clustering()` 한 함수만 교체하면 KoSentenceBERT 임베딩으로 전환 가능.
 - **왜 2단 프롬프트 체인?** "기사별 요약(Step1) + 카테고리별 라디오(Step2)" 가 UI 의 카드 단위(카테고리당 기사 3건 + 라디오 1개)와 1:N 정합. 중요도/감성 등 UI 에서 소비되지 않는 필드는 제거해 토큰 · 지연 절감.
 - **왜 reports + articles 2 테이블?** 단일 briefings 테이블이 "한 카테고리 = N 기사 + 1 라디오" 구조와 안 맞아 2 테이블로 분리. cascade delete + `report.articles` relationship.
@@ -275,7 +234,7 @@ Naver 검색 API  ─┘   → 40~60건 unique            │   (문어체 + 재
 ## AI 도구 사용 공개 (과제 요건 준수)
 
 **실행 AI (런타임 호출)**
-- OpenAI `gpt-5-nano` — LLM 분석 + 라디오 스크립트
+- OpenAI `gpt-5-mini` — LLM 분석 + 라디오 스크립트
 - OpenAI `gpt-4o-mini-tts` — TTS 폴백
 - ElevenLabs `eleven_multilingual_v2` — TTS 메인
 
@@ -283,7 +242,7 @@ Naver 검색 API  ─┘   → 40~60건 unique            │   (문어체 + 재
 - **Claude Code** (Anthropic) — 주요 개발 파트너. 설계 / 백엔드 / 프론트엔드 / 디버깅 전 단계.
 - **v0.app** (Vercel) — 초기 대시보드 UI 스캐폴드. 이후 Claude Code 와 수동 리팩토링.
 
-개발 방법론: **PDCA (Plan → Design → Do → Check → Act)** — `docs/01-plan ~ 04-report` 에 단계별 문서화.
+개발 방법론: **PDCA (Plan → Design → Do → Check → Act)** 
 
 ---
 
