@@ -12,9 +12,9 @@
 
 1. **4 소스 교차 수집** — 연합뉴스 · 서울신문 RSS(본사 직접) + Google News RSS(aggregator) + Naver 검색 API. 단일 포털 의존 차단 + 저작권 안전(메타데이터만).
 2. **TF-IDF 클러스터링으로 공영 중요도 자동 판정** — 코사인 유사도 0.45 + bigram + sublinear TF. "여러 매체가 동시 보도 = 공영 가치 높음" 가설을 수학적으로 구현. 60~80건 → 상위 3개 이슈로 압축 → **LLM 호출 비용 약 95% 절감**.
-3. **프롬프트 엔지니어링 2단 체인** — Step1 기사별 3줄 요약(문어체) → Step2 카테고리별 라디오 스크립트(2~3분 구어체). `gpt-5-nano` 의 temperature 미지원 제약을 구조화 응답으로 우회.
+3. **프롬프트 엔지니어링 2단 체인** — Step1 기사별 3줄 요약(문어체) → Step2 카테고리별 라디오 스크립트(2~3분 구어체). `gpt-5-mini' 사용
 4. **라디오 편지 (이중 TTS 엔진)** — ElevenLabs `eleven_multilingual_v2` 메인 + OpenAI `gpt-4o-mini-tts` 폴백. 사용자가 설정 페이지에서 엔진 토글. 엔진별 독립 캐시 (`{report_id}.{engine}.mp3`).
-5. **인라인 오디오 발송** — 이메일에 카테고리별 mp3 첨부, Slack 에는 `files.upload_v2` 로 스레드 내 재생 가능.
+5. **인라인 오디오 발송** — 이메일에 카테고리별 mp3 첨부, Slack 에는 스레드 내 재생 가능.
 6. **동적 오프셋 스케줄러** — APScheduler cron 이 사용자 카테고리 수 × 1분 만큼 실행 시각을 앞당겨, 파이프라인 완료 시점이 사용자 지정 시각과 정렬.
 
 ---
@@ -28,27 +28,27 @@
 │  • /          → /dashboard │                 │  Routers                         │
 │  • /dashboard              │                 │   ├─ users                       │
 │    ├─ CategoryReportGrid   │                 │   ├─ settings (PUT upsert)       │
-│    ├─ GenerationProgress   │                 │   ├─ reports  (list/detail/     │
-│    ├─ DateGroupedDashboard │                 │   │   generate + /audio + SSE)  │
-│    └─ RadioPlayerBar       │                 │   ├─ send     (다채널 배치)      │
-│  • /dashboard/settings     │                 │   └─ dispatches (보관함)         │
+│    ├─ GenerationProgress   │                 │   ├─ reports  (list/detail/      │
+│    ├─ DateGroupedDashboard │                 │   │   generate + /audio + SSE)   │
+│    └─ RadioPlayerBar       │                 │   ├─ send     (다채널 배치)         │
+│  • /dashboard/settings     │                 │   └─ dispatches (보관함)           │
 │  • /dashboard/history      │                 │                                  │
 └────────────────────────────┘                 │  Pipeline                        │
-                                               │   ├─ collector    (4 소스)       │
+                                               │   ├─ collector    (4 소스)        │
                                                │   ├─ preprocessor (TF-IDF 0.45)  │
                                                │   ├─ analyzer     (gpt-5-nano)   │
-                                               │   └─ service      (오케스트레이션)│
+                                               │   └─ service      (오케스트레이션)   │
                                                │                                  │
                                                │  Dispatcher                      │
-                                               │   ├─ WebSender    (DB 저장)      │
+                                               │   ├─ WebSender    (DB 저장)       │
                                                │   ├─ SlackSender  (Webhook/Bot)  │
                                                │   └─ EmailSender  (SMTP + mp3)   │
                                                │                                  │
                                                │  Services                        │
                                                │   └─ tts.py (ElevenLabs/OpenAI)  │
                                                │                                  │
-                                               │  Scheduler (APScheduler, 활성)   │
-                                               │   └─ cron + 동적 오프셋          │
+                                               │  Scheduler (APScheduler, 활성)    │
+                                               │   └─ cron + 동적 오프셋             │
                                                │                                  │
                                                │  SQLite (users · settings ·     │
                                                │   reports · articles · send_logs)│
@@ -75,7 +75,7 @@
 | Slack | Incoming Webhook **또는** Bot Token (`files.upload_v2` 인라인 오디오) | ✅ |
 | Email | SMTP (Gmail App Password) + HTML 본문 + 카테고리별 mp3 첨부 | ✅ |
 
-> 모든 LLM/TTS API 호출은 백엔드에서만 수행합니다. 프론트엔드 번들에 외부 AI URL 0건 (`grep` 검증).
+> 모든 LLM/TTS API 호출은 백엔드에서만 수행합니다. 프론트엔드 번들에 외부 AI URL 0건.
 
 ---
 
@@ -246,6 +246,5 @@ Naver 검색 API  ─┘   → 40~60건 unique            │   (문어체 + 재
 
 ---
 
-## 라이선스
 
-서울신문 과제평가 제출용 프로토타입. 코드 재사용 시 별도 문의 바랍니다.
+서울신문 과제평가 제출용 프로토타입
