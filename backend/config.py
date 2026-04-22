@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-5-nano"
+    OPENAI_MODEL: str = "gpt-5-mini"
     # OpenAI TTS kept as a fallback engine. When ELEVENLABS_API_KEY is set,
     # services/tts.py prefers ElevenLabs to keep the TTS provider cleanly
     # separated from the LLM selection list required by the submission brief.

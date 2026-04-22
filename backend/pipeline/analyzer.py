@@ -1,6 +1,6 @@
 """LLM analyzer: per-article 3-line summary + per-category radio synthesis.
 
-Default provider: OpenAI (gpt-5-nano). GeminiAnalyzer kept as legacy fallback.
+Default provider: OpenAI (gpt-5-mini). GeminiAnalyzer kept as legacy fallback.
 
 GPT-5 family note: does not accept custom `temperature` (always default 1.0).
 """
@@ -44,7 +44,7 @@ def _build_articles_block(articles: list[RawArticle], summaries: list[str]) -> s
 
 
 # ============================================================
-# OpenAI (default — gpt-5-nano)
+# OpenAI (default — gpt-5-mini)
 # ============================================================
 
 class OpenAIAnalyzer:

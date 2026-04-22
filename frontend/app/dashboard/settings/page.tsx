@@ -471,7 +471,7 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
                 <div className="font-medium text-foreground mb-1">텍스트 분석</div>
-                OpenAI <code className="text-xs">gpt-5-nano</code> 고정 (과제 조건 충족용).
+                OpenAI <code className="text-xs">gpt-5-mini</code>
               </div>
 
               <div className="rounded-xl border border-border bg-card p-4">
@@ -499,7 +499,7 @@ export default function SettingsPage() {
                     <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
                       자연스러운 음성 · 월 10K자 무료
                       <br />
-                      (품질 우선 · 시연·발표용)
+                      
                     </div>
                   </button>
                   <button
@@ -521,7 +521,6 @@ export default function SettingsPage() {
                       <code className="text-[11px]">gpt-4o-mini-tts</code> ·
                       pay-per-use
                       <br />
-                      (리허설용 · ElevenLabs 한도 아낌)
                     </div>
                   </button>
                 </div>

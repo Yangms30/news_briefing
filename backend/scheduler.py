@@ -36,7 +36,7 @@ def _compute_offset_minutes(category_count: int) -> int:
 
     Real measurements: 6-category dispatch lands ~5 min after cron fires;
     each category contributes roughly 1 minute of LLM + TTS work on the
-    gpt-5-nano + gpt-4o-mini-tts / ElevenLabs stack we use. Shifting the
+    gpt-5-mini + gpt-4o-mini-tts / ElevenLabs stack we use. Shifting the
     trigger by that amount makes the user-visible arrival time line up
     with the clock time the user configured.
     """

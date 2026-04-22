@@ -33,7 +33,7 @@ collector.py ──▶ preprocessor.py ──▶ analyzer.py ──▶ service.p
   - 공통 helper `_fetch_rss_url()`가 timeout=20s + max_attempts=3 + linear backoff. 한 소스가 타임아웃/404여도 다른 소스 결과는 유지.
   - 새 소스 추가: 동일 인터페이스(`fetch(category) -> list[RawArticle]`)의 Client 클래스 만들고 `MultiSourceCollector.__init__`의 기본 목록에 추가.
 - **`pipeline/preprocessor.py`** — LLM 호출 없음. 제목을 TF-IDF 벡터화 후 코사인 유사도 ≥ `CLUSTER_THRESHOLD`(0.6)로 그리디 클러스터링. 클러스터당 대표 기사 2~3건(최신순 + 출처 다양성). 노이즈 제거는 `NOISE_PATTERNS` 정규식.
-- **`pipeline/analyzer.py`** — **여기에만 LLM 호출 집중.** 기본 `OpenAIAnalyzer` (`gpt-5-nano`). `GeminiAnalyzer`는 레거시 폴백 클래스로 보존. 2단 호출:
+- **`pipeline/analyzer.py`** — **여기에만 LLM 호출 집중.** 기본 `OpenAIAnalyzer` (`gpt-5-mini`). `GeminiAnalyzer`는 레거시 폴백 클래스로 보존. 2단 호출:
   1. `summarize_article(category, article)` — 기사별 3줄 한국어 요약(문어체). 길이 ≥ 30자 검증 + `LLM_MAX_RETRIES`회 재시도 → 실패 시 `RawArticle.summary` 기반 RSS fallback.
   2. `synthesize_radio(category, articles_with_summary)` — 30초~1분 분량 카테고리별 구어체 라디오 스크립트 (숫자/약어 한글 변환 포함). 실패 시 `radio_script=None`으로 graceful 저장.
   - **gpt-5 family 제약**: `temperature` 파라미터 전달 불가 (기본 1.0 강제). 톤 제어는 프롬프트에서만.
@@ -75,7 +75,7 @@ collector.py ──▶ preprocessor.py ──▶ analyzer.py ──▶ service.p
 
 ## LLM 모델 제약 (중요)
 
-메인은 **`OPENAI_MODEL=gpt-5-nano`** (`.env`). 이유:
+메인은 **`OPENAI_MODEL=gpt-5-mini`** (`.env`). 이유:
 - 경량/저비용 OpenAI 계열. `gpt-5` family는 `temperature`/`top_p` 등 샘플링 파라미터 전달 불가 (기본 1.0 고정) — 톤 제어는 프롬프트에서만.
 - `OpenAIAnalyzer`가 `client.chat.completions.create`로 호출. 재시도/검증은 `analyzer.py` 내 `_call_with_retry()` 패턴 준수.
 
