@@ -54,10 +54,20 @@ def _active_channels(channels: dict) -> list[tuple[str, object]]:
     return out
 
 
-def _latest_reports_per_category(db: Session, user_id: int) -> list[Report]:
+def _latest_reports_per_category(
+    db: Session, user_id: int, categories: list[str]
+) -> list[Report]:
+    """Latest report per category, scoped to the user's currently-selected
+    categories. If the user deselects a category in Settings, its past
+    reports stay in the DB for history views but are excluded from dispatch.
+    """
+    if not categories:
+        return []
+    allowed = set(categories)
     rows = (
         db.query(Report)
         .filter(Report.user_id == user_id)
+        .filter(Report.category.in_(allowed))
         .order_by(Report.created_at.desc())
         .all()
     )
@@ -84,7 +94,17 @@ def dispatch_user_reports(db: Session, user_id: int) -> list[ChannelResult]:
     except json.JSONDecodeError:
         channels = {}
 
-    reports = _latest_reports_per_category(db, user_id)
+    # Honor the user's *current* category selection — past reports for
+    # categories they've since removed from Settings must not be re-sent.
+    try:
+        categories: list[str] = json.loads(setting.categories or "[]")
+    except json.JSONDecodeError:
+        categories = []
+    if not categories:
+        logger.info("user_id=%s: no categories configured, skipping dispatch", user_id)
+        return []
+
+    reports = _latest_reports_per_category(db, user_id, categories)
     if not reports:
         logger.info("user_id=%s: no reports to dispatch", user_id)
         return []

@@ -5,7 +5,11 @@ import { toast } from "sonner"
 import { DashboardHeader } from "@/components/dashboard/dashboard-header"
 import { RadioPlayerBar } from "@/components/dashboard/radio-player-bar"
 import { QuickActions } from "@/components/dashboard/quick-actions"
-import { DateGroupedDashboard } from "@/components/dashboard/date-grouped-dashboard"
+import {
+  DateGroupedDashboard,
+  localDateKey,
+  parseUtcIso,
+} from "@/components/dashboard/date-grouped-dashboard"
 import { GenerationProgressPanel } from "@/components/dashboard/generation-progress-panel"
 import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -30,6 +34,22 @@ export default function DashboardPage() {
   const [pauseSignal, setPauseSignal] = useState(0)
   const [progressEvents, setProgressEvents] = useState<GenerateProgressEvent[]>([])
   const [setting, setSetting] = useState<Setting | null>(null)
+  // Which date sections are expanded in the grouped dashboard. Today is
+  // auto-expanded on mount; past dates start collapsed. This state controls
+  // BOTH the accordion UI and the radio player's playback queue (see
+  // `radioQueueReports` below) — a section has to be visible to be playable.
+  const [openDateKeys, setOpenDateKeys] = useState<Set<string>>(() =>
+    new Set([localDateKey(new Date())])
+  )
+
+  const handleToggleDate = useCallback((dateKey: string) => {
+    setOpenDateKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(dateKey)) next.delete(dateKey)
+      else next.add(dateKey)
+      return next
+    })
+  }, [])
 
   const fetchList = useCallback(async (id: number) => {
     try {
@@ -153,12 +173,30 @@ export default function DashboardPage() {
     [reports, selectedCategory]
   )
 
+  // Radio player queue = primary report per (date × category) for every
+  // currently-expanded date section. Collapsed dates contribute nothing,
+  // which keeps the queue scoped to what the user can actually see.
+  // `reports` is DESC by `created_at`, so the first entry encountered per
+  // (date, category) pair is the newest — the "primary" card.
+  const radioQueueReports = useMemo(() => {
+    const byDateCat = new Map<string, Report>()
+    for (const r of reports) {
+      const d = parseUtcIso(r.created_at)
+      if (Number.isNaN(d.getTime())) continue
+      const dk = localDateKey(d)
+      if (!openDateKeys.has(dk)) continue
+      const key = `${dk}::${r.category}`
+      if (!byDateCat.has(key)) byDateCat.set(key, r)
+    }
+    return Array.from(byDateCat.values())
+  }, [reports, openDateKeys])
+
   return (
     <div className="min-h-screen">
       <DashboardHeader />
 
       <RadioPlayerBar
-        reports={reports}
+        reports={radioQueueReports}
         isExpanded={isExpanded}
         setIsExpanded={setIsExpanded}
         externalCategory={pendingPlay}
@@ -198,6 +236,8 @@ export default function DashboardPage() {
             reports={filtered}
             playingCategory={playingCategory}
             playingReportId={playingReportId}
+            openDateKeys={openDateKeys}
+            onToggleDate={handleToggleDate}
             onPlayCategory={(cat) => {
               setPendingPlay(cat)
               setPlayingReportId(null)

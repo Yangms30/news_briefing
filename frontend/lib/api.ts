@@ -15,6 +15,10 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const GENERATE_TIMEOUT_MS = 120_000
+// Dispatch (POST /api/send) synthesizes per-category TTS, opens an SMTP
+// connection with multipart mp3 attachments, and runs the 3-step Slack
+// files.upload_v2 flow per category. Empirically 30s–2min; allow headroom.
+const DISPATCH_TIMEOUT_MS = 300_000
 
 export class BriefBotApiError extends Error {
   readonly status: number
@@ -254,6 +258,7 @@ export const api = {
       return request<SendResponse>("/api/send", {
         method: "POST",
         query: { user_id: userId },
+        timeoutMs: DISPATCH_TIMEOUT_MS,
       })
     },
   },

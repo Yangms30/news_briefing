@@ -27,21 +27,32 @@ type Props = {
   onPlayReportId: (reportId: number) => void
   /** Report id currently playing (used to highlight play state on non-primary cards). */
   playingReportId: number | null
+  /**
+   * Controlled set of date keys (YYYY-MM-DD, local TZ) whose sections are
+   * expanded. Lifted to the parent so the radio player can filter its queue
+   * to the currently-visible reports.
+   */
+  openDateKeys: Set<string>
+  /** Toggle a date section open/closed. Parent mutates its Set. */
+  onToggleDate: (dateKey: string) => void
 }
 
 /**
  * Backend emits datetime.utcnow() without a tz suffix. `new Date(iso)` in the
  * browser then silently treats it as local time, which shifts the date key.
  * Force UTC interpretation before formatting for consistent day grouping.
+ *
+ * Exported so the parent page can build radio-queue filters on the same
+ * date-key convention without duplicating logic.
  */
-function parseUtcIso(iso: string): Date {
+export function parseUtcIso(iso: string): Date {
   if (!iso) return new Date(NaN)
   const hasTz = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso)
   return new Date(hasTz ? iso : `${iso}Z`)
 }
 
 /** Local-timezone YYYY-MM-DD for stable grouping + map lookup. */
-function localDateKey(d: Date): string {
+export function localDateKey(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")
   const day = String(d.getDate()).padStart(2, "0")
@@ -177,6 +188,8 @@ function CategoryGroup({
 
 function DateSection({
   group,
+  open,
+  onToggle,
   playingCategory,
   playingReportId,
   onPlayCategory,
@@ -184,19 +197,19 @@ function DateSection({
   onPlayReportId,
 }: {
   group: DateGroup
+  open: boolean
+  onToggle: () => void
   playingCategory: string | null
   playingReportId: number | null
   onPlayCategory: (category: string) => void
   onPauseCategory: () => void
   onPlayReportId: (id: number) => void
 }) {
-  const [open, setOpen] = useState(group.isToday)
-
   return (
     <section className="rounded-2xl border border-border/50 bg-background/40">
       <button
         type="button"
-        onClick={() => setOpen((s) => !s)}
+        onClick={onToggle}
         className={cn(
           "w-full flex items-center justify-between px-4 py-3 text-left rounded-2xl",
           "hover:bg-muted/30 transition-colors"
@@ -255,6 +268,8 @@ export function DateGroupedDashboard({
   onPauseCategory,
   onPlayReportId,
   playingReportId,
+  openDateKeys,
+  onToggleDate,
 }: Props) {
   const groups = useMemo(() => groupByDateThenCategory(reports), [reports])
 
@@ -266,6 +281,8 @@ export function DateGroupedDashboard({
         <DateSection
           key={g.dateKey}
           group={g}
+          open={openDateKeys.has(g.dateKey)}
+          onToggle={() => onToggleDate(g.dateKey)}
           playingCategory={playingCategory}
           playingReportId={playingReportId}
           onPlayCategory={onPlayCategory}
